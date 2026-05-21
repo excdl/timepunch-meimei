@@ -67,11 +67,6 @@ let gpsAccuracy = null;
 let cachedIP = "";
 let lastRangeStatus = null;
 
-/* ===== 優化：避免重複請求 ===== */
-let lastQueryKey = "";
-let ipPromise = null;
-
-/* ===== DOM ===== */
 const btnStart=document.getElementById("btnStart");
 const btnEnd=document.getElementById("btnEnd");
 const userInfo=document.getElementById("userInfo");
@@ -79,7 +74,7 @@ const statusInfo=document.getElementById("statusInfo");
 const dateTime=document.getElementById("dateTime");
 const todayRecords=document.getElementById("todayRecords");
 
-/* ===== 主管 ===== */
+/* ===== 讀取主管 ===== */
 async function loadManagers(){
   try{
     const res = await fetch(`${API_ENDPOINT}?action=getManagers`);
@@ -96,7 +91,7 @@ function getTodayString(){
   return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 }
 
-/* ===== 鎖按鈕 ===== */
+/* ===== 按鈕鎖定 ===== */
 function setButtonsLock(lock){
   btnStart.disabled=lock;
   btnEnd.disabled=lock;
@@ -104,47 +99,42 @@ function setButtonsLock(lock){
 
 /* ===== 時間 ===== */
 function updateDateTime(){
-  dateTime.textContent=new Date().toLocaleString("zh-TW",{hour12:false});
+  const now=new Date();
+  dateTime.textContent=now.toLocaleString("zh-TW",{hour12:false});
 }
 setInterval(updateDateTime,1000);
 updateDateTime();
 
-/* ===== IP（優化快取） ===== */
+/* ===== IP ===== */
 async function preloadIP(){
-  if (ipPromise) return ipPromise;
-
-  ipPromise = fetch("https://api.ipify.org?format=json")
-    .then(r => r.json())
-    .then(d => cachedIP = d.ip)
-    .catch(() => "");
-
-  return ipPromise;
+  try{
+    const res=await fetch("https://api.ipify.org?format=json");
+    const data=await res.json();
+    cachedIP = data.ip;
+  }catch{}
 }
 function getIP(){
   return cachedIP || "";
 }
 
-/* ===== GPS（優化：減少重複更新） ===== */
+/* ===== GPS ===== */
 function initGPSWatcher(){
   if(!navigator.geolocation) return;
 
-  let lastLat=null, lastLng=null;
-
   navigator.geolocation.watchPosition(
     pos=>{
-      const lat=pos.coords.latitude;
-      const lng=pos.coords.longitude;
-
-      if(lat===lastLat && lng===lastLng) return;
-
-      lastLat=lat;
-      lastLng=lng;
-
       gpsAccuracy = pos.coords.accuracy;
-      lastGPS = {lat,lng};
+      lastGPS = {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude
+      };
     },
     err=>console.warn("GPS錯誤:",err),
-    { enableHighAccuracy:true, maximumAge:5000, timeout:8000 }
+    {
+      enableHighAccuracy:true,
+      maximumAge:3000,
+      timeout:5000
+    }
   );
 }
 
@@ -152,7 +142,9 @@ function initGPSWatcher(){
 async function initUser(){
   await liff.init({ liffId: "2008786085-L1CtKqqv" });
 
-  if (!liff.isLoggedIn()) await liff.login();
+  if (!liff.isLoggedIn()) {
+    await liff.login();
+  }
 
   const profile = await liff.getProfile();
   userId = profile.userId;
@@ -161,6 +153,7 @@ async function initUser(){
   userInfo.textContent = `${userName} 您好`;
 
   await loadManagers();
+
   isManager = MANAGERS.includes(userId);
 
   if (isManager) {
@@ -168,92 +161,90 @@ async function initUser(){
   }
 }
 
-/* ===== 狀態（核心優化） ===== */
-async function updateStatus(){
+/* ===== 狀態 ===== */
+async function updateStatus() {
 
-  if(!lastGPS){
-    statusInfo.textContent="定位中…";
-    statusInfo.style.background="#95a5a6";
-    statusLoaded=false;
+  if (!lastGPS) {
+    statusInfo.textContent = "定位中…";
+    statusInfo.style.background = "#95a5a6";
+    statusLoaded = false;
     return;
   }
 
-  const queryKey = `${lastGPS.lat.toFixed(5)}_${lastGPS.lng.toFixed(5)}_${getIP()}`;
-  if(queryKey === lastQueryKey) return;
-  lastQueryKey = queryKey;
-
-  try{
+  try {
     const res = await fetch(
       `${API_ENDPOINT}?action=check&lat=${lastGPS.lat}&lng=${lastGPS.lng}&ip=${getIP()}`
     );
 
     const data = await res.json();
     const newStatus = data.rangeStatus;
+    if (!newStatus) return;
 
-    if(!newStatus || newStatus===lastRangeStatus) return;
-
+    if (newStatus === lastRangeStatus) return;
     lastRangeStatus = newStatus;
 
-    const valid = newStatus==="有效打卡區";
+    if (newStatus === "有效打卡區") {
+      statusInfo.style.background = "#2ecc71";
+      statusInfo.textContent = "有效打卡區";
 
-    statusInfo.style.background = valid ? "#2ecc71" : "#e74c3c";
-    statusInfo.textContent = valid
-      ? "有效打卡區"
-      : `無效打卡區${data.distance?` (${data.distance} 公尺)`:""}`;
+      btnStart.disabled = false;
+      btnEnd.disabled = false;
 
-    btnStart.disabled = !valid && !isManager;
-    btnEnd.disabled = !valid && !isManager;
+    } else {
+      statusInfo.style.background = "#e74c3c";
+      const distText = data.distance ? ` (${data.distance} 公尺)` : "";
+      statusInfo.textContent = "無效打卡區" + distText;
+
+      if (isManager) {
+        btnStart.disabled = false;
+        btnEnd.disabled = false;
+      } else {
+        btnStart.disabled = true;
+        btnEnd.disabled = true;
+      }
+    }
 
     statusLoaded = true;
 
-  }catch(err){
-    console.warn("狀態更新失敗:",err);
+  } catch (err) {
+    console.warn("狀態更新失敗:", err);
   }
 }
 
-/* ===== 今日紀錄（優化 DOM） ===== */
+/* ===== 今日紀錄 ===== */
 async function updateTodayRecords(){
-  todayRecords.textContent="載入中...";
-
+  todayRecords.innerHTML="載入中...";
   try{
-    const res = await fetch(
-      `${API_ENDPOINT}?action=getToday&userId=${userId}&date=${getTodayString()}`
-    );
+    const res = await fetch(`${API_ENDPOINT}?action=getToday&userId=${userId}&date=${getTodayString()}`);
     const data = await res.json();
 
     if(!data.length){
-      todayRecords.textContent="今日打卡紀錄：無";
+      todayRecords.innerHTML="今日打卡紀錄：無";
       return;
     }
 
-    todayRecords.innerHTML =
-      "今日打卡紀錄：<br>" +
-      data.map(r=>{
-        let color="#3498db";
-        if(r.status==="下班") color="#2ecc71";
-        if(r.company.includes("錯誤")) color="#e67e22";
+    todayRecords.innerHTML="今日打卡紀錄：<br>";
 
-        return `<span style="border-left-color:${color}">
-          ${r.status}：${r.time}（${r.company}）
-        </span>`;
-      }).join("");
-
+    data.forEach(r=>{
+      let color="#3498db";
+      if(r.status==="下班") color="#2ecc71";
+      if(r.company.includes("錯誤")) color="#e67e22";
+      todayRecords.innerHTML+=`<span style="border-left-color:${color}">${r.status}：${r.time}（${r.company}）</span>`;
+    });
   }catch{
-    todayRecords.textContent="今日打卡紀錄：讀取失敗";
+    todayRecords.innerHTML="今日打卡紀錄：讀取失敗";
   }
 }
 
-/* ===== LINE 訊息（原功能保留） ===== */
+/* ===== LINE 訊息 ===== */
 async function sendSelfMessage(record){
   if(!liff.isInClient()) return;
 
-  let headerColor="#3498db";
-  if(record.status==="下班") headerColor="#2ecc71";
-  if(record.rangeStatus!=="有效打卡區") headerColor="#e67e22";
+  let headerColor = "#3498db";
+  if(record.status === "下班") headerColor = "#2ecc71";
+  if(record.rangeStatus !== "有效打卡區") headerColor = "#e67e22";
 
-  let reasonText = record.rangeStatus!=="有效打卡區"
-    ? "異常原因：超出打卡區"
-    : "";
+  let reasonText = record.rangeStatus !== "有效打卡區" ? "異常原因：超出打卡區" : "";
 
   try{
     await liff.sendMessages([{
@@ -282,19 +273,20 @@ async function sendSelfMessage(record){
             {type:"text", text:`狀態：${record.status}`},
             {type:"text", text:`時間：${record.date} ${record.time}`},
             {type:"text", text:`位置：${record.company}`},
-            ...(reasonText?[{type:"text", text:reasonText,color:"#e67e22"}]:[])
+            ...(reasonText ? [{type:"text", text: reasonText, color:"#e67e22"}] : [])
           ]
         }
       }
     }]);
+  // 等待 LINE client flush
+    await new Promise(r => setTimeout(r, 800));
 
-    await new Promise(r=>setTimeout(r,800));
+    console.log("訊息已送出");
 
   }catch(err){
-    console.error("LIFF 訊息失敗:",err);
+    console.error("LIFF 訊息傳送失敗:", err);
   }
 }
-
 /* ===== 打卡 ===== */
 async function clockInOut(status){
 
@@ -303,18 +295,25 @@ async function clockInOut(status){
     return;
   }
 
-  if(lastRangeStatus!=="有效打卡區" && !isManager){
-    Swal.fire({icon:"warning",title:"目前為無效打卡區",timer:1500,showConfirmButton:false});
+  // ❗ 非主管 + 無效區 → 禁止
+  if (lastRangeStatus !== "有效打卡區" && !isManager) {
+    Swal.fire({
+      icon: "warning",
+      title: "目前為無效打卡區",
+      text: "僅主管可打卡",
+      timer: 1500,
+      showConfirmButton: false
+    });
     return;
   }
 
-  const btn=status==="上班"?btnStart:btnEnd;
-  btn.disabled=true;
-  const originalText=btn.textContent;
+  const btn = status==="上班"?btnStart:btnEnd;
+  btn.disabled = true;
+  const originalText = btn.textContent;
 
-  let sec=3;
-  const timer=setInterval(()=>{
-    btn.textContent=`打卡中… ${sec}s`;
+  let sec = 3;
+  const timer = setInterval(()=>{
+    btn.textContent = `打卡中… ${sec}s`;
     sec--;
     if(sec<0) clearInterval(timer);
   },1000);
@@ -325,30 +324,30 @@ async function clockInOut(status){
       return;
     }
 
-    const res=await fetch(API_ENDPOINT,{
+    const res = await fetch(API_ENDPOINT, {
       method:"POST",
-      body:JSON.stringify({userId,userName,ip:getIP(),gps:lastGPS,status})
+      body: JSON.stringify({userId,userName,ip:getIP(),gps:lastGPS,status})
     });
 
-    const data=await res.json();
+    const data = await res.json();
 
-    if(data.message && (data.message.includes("已更新")||data.message.includes("成功"))){
+    const actuallyUpdated = data.message && (data.message.includes("已更新") || data.message.includes("成功"));
 
-      const record={
+    if(actuallyUpdated){
+      const record = {
         userName,
-        status:data.status,
-        date:data.date,
-        time:data.time,
-        company:data.company||"未知",
-        rangeStatus:data.rangeStatus
+        status: data.status,
+        date: data.date,
+        time: data.time,
+        company: data.company || "未知",
+        rangeStatus: data.rangeStatus
       };
 
-      Swal.fire({
-        icon:data.rangeStatus==="有效打卡區"?"success":"warning",
-        title:data.rangeStatus==="有效打卡區"?"打卡成功":"打卡無效",
-        timer:2000,
-        showConfirmButton:false
-      });
+      if(data.rangeStatus === "有效打卡區"){
+        Swal.fire({icon:"success",title:"打卡成功",timer:2000,showConfirmButton:false});
+      } else {
+        Swal.fire({icon:"warning",title:"打卡無效",timer:2000,showConfirmButton:false});
+      }
 
       sendSelfMessage(record);
       updateTodayRecords();
@@ -357,24 +356,24 @@ async function clockInOut(status){
 
   }catch(err){
     Swal.fire({icon:"error",title:"打卡失敗",timer:2000,showConfirmButton:false});
-  }finally{
+  } finally {
     clearInterval(timer);
-    btn.textContent=originalText;
-    btn.disabled=false;
+    btn.textContent = originalText;
+    btn.disabled = false;
   }
 }
 
-btnStart.onclick=()=>clockInOut("上班");
-btnEnd.onclick=()=>clockInOut("下班");
+btnStart.onclick = () => clockInOut("上班");
+btnEnd.onclick = () => clockInOut("下班");
 
-document.getElementById("btnApprove").onclick=()=>{
-  window.location.href="https://script.google.com/macros/s/AKfycbz1FavWzmy5sl8iFCRfp7ZHQ_3EdFhTw_M093XAtq8ISIn9jiWrujfgZjjqRZxorTdkLQ/exec";
+document.getElementById("btnApprove").onclick = () => {
+  window.location.href = "https://script.google.com/macros/s/AKfycbz1FavWzmy5sl8iFCRfp7ZHQ_3EdFhTw_M093XAtq8ISIn9jiWrujfgZjjqRZxorTdkLQ/exec";
 };
 
 /* ===== 載入 ===== */
-window.onload=async()=>{
-  statusInfo.textContent="定位載入中…";
-  statusInfo.style.background="#95a5a6";
+window.onload = async () => {
+  statusInfo.textContent = "定位載入中…";
+  statusInfo.style.background = "#95a5a6";
 
   setButtonsLock(true);
 
@@ -385,16 +384,10 @@ window.onload=async()=>{
   updateTodayRecords();
 
   setButtonsLock(false);
-  dataReady=true;
+  dataReady = true;
 
   updateStatus();
-
-  // 🚀 降頻 + 前景才更新
-  setInterval(()=>{
-    if(document.visibilityState==="visible"){
-      updateStatus();
-    }
-  },8000);
+  setInterval(updateStatus, 3000);
 };
 </script>
 
