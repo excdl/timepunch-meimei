@@ -56,17 +56,25 @@ button:disabled {opacity:0.5;cursor:not-allowed;}
 <script>
 const API_ENDPOINT="https://script.google.com/macros/s/AKfycbw2dT2HNMpk4ItYnS2sdKBSkjBCMQqPU07KdKvuJZkHaYlr7UHLW_l__c18gOWZ0iAp/exec";
 
+/* ===== 主管名單（前端） ===== */
+const MANAGERS = [
+  "U10fee4a9c1cb88e07f7e4c5e35e74100",
+  "U8548bb876dda1d67c87170aba8b518f7"
+];
+
+/* ===== 狀態變數 ===== */
 let userId="", userName="", dataReady=false;
 let statusLoaded=false;
-let MANAGERS = [];
 let isManager = false;
 
-/* ===== GPS 即時系統 ===== */
+/* ===== GPS ===== */
 let lastGPS = null;
+let lastCheckGPS = null;
 let gpsAccuracy = null;
-let cachedIP = "";
 let lastRangeStatus = null;
+let cachedIP = "";
 
+/* ===== DOM ===== */
 const btnStart=document.getElementById("btnStart");
 const btnEnd=document.getElementById("btnEnd");
 const userInfo=document.getElementById("userInfo");
@@ -74,27 +82,19 @@ const statusInfo=document.getElementById("statusInfo");
 const dateTime=document.getElementById("dateTime");
 const todayRecords=document.getElementById("todayRecords");
 
-/* ===== 讀取主管 ===== */
-async function loadManagers(){
-  try{
-    const res = await fetch(`${API_ENDPOINT}?action=getManagers`);
-    MANAGERS = await res.json();
-  }catch(err){
-    console.error("讀取主管失敗", err);
-    MANAGERS = [];
-  }
-}
+/* ===== 距離計算 ===== */
+function getDistance(lat1, lng1, lat2, lng2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
 
-/* ===== 日期 ===== */
-function getTodayString(){
-  const d=new Date();
-  return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
-}
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) *
+    Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) ** 2;
 
-/* ===== 按鈕鎖定 ===== */
-function setButtonsLock(lock){
-  btnStart.disabled=lock;
-  btnEnd.disabled=lock;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
 /* ===== 時間 ===== */
@@ -117,57 +117,58 @@ function getIP(){
   return cachedIP || "";
 }
 
-/* ===== GPS ===== */
-function initGPSWatcher(){
-  if(!navigator.geolocation) return;
+/* ===== GPS（核心優化） ===== */
+function initGPSWatcher() {
+  if (!navigator.geolocation) return;
 
   navigator.geolocation.watchPosition(
-    pos=>{
+    pos => {
+
       gpsAccuracy = pos.coords.accuracy;
-      lastGPS = {
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude
-      };
+
+      const lat = pos.coords.latitude;
+      const lng = pos.coords.longitude;
+
+      lastGPS = { lat, lng };
+
+      // 🔥 30公尺內不重複觸發 API
+      if (lastCheckGPS) {
+        const dist = getDistance(
+          lastCheckGPS.lat,
+          lastCheckGPS.lng,
+          lat,
+          lng
+        );
+
+        if (dist < 30) return;
+      }
+
+      lastCheckGPS = { lat, lng };
+
+      updateStatus();
+
     },
-    err=>console.warn("GPS錯誤:",err),
+    err => console.warn("GPS錯誤:", err),
     {
-      enableHighAccuracy:true,
-      maximumAge:3000,
-      timeout:5000
+      enableHighAccuracy: true,
+      maximumAge: 3000,
+      timeout: 5000
     }
   );
 }
 
-/* ===== LIFF ===== */
-async function initUser(){
-  await liff.init({ liffId: "2008786085-L1CtKqqv" });
-
-  if (!liff.isLoggedIn()) {
-    await liff.login();
-  }
-
-  const profile = await liff.getProfile();
-  userId = profile.userId;
-  userName = profile.displayName;
-
-  userInfo.textContent = `${userName} 您好`;
-
-  await loadManagers();
-
-  isManager = MANAGERS.includes(userId);
-
-  if (isManager) {
-    document.getElementById("btnApprove").style.display = "block";
-  }
+/* ===== 鎖按鈕 ===== */
+function setButtonsLock(lock){
+  btnStart.disabled=lock;
+  btnEnd.disabled=lock;
 }
 
-/* ===== 狀態 ===== */
+/* ===== 狀態檢查 ===== */
 async function updateStatus() {
 
   if (!lastGPS) {
     statusInfo.textContent = "定位中…";
     statusInfo.style.background = "#95a5a6";
-    statusLoaded = false;
     return;
   }
 
@@ -178,9 +179,10 @@ async function updateStatus() {
 
     const data = await res.json();
     const newStatus = data.rangeStatus;
-    if (!newStatus) return;
 
+    if (!newStatus) return;
     if (newStatus === lastRangeStatus) return;
+
     lastRangeStatus = newStatus;
 
     if (newStatus === "有效打卡區") {
@@ -192,13 +194,10 @@ async function updateStatus() {
 
     } else {
       statusInfo.style.background = "#e74c3c";
-      const distText = data.distance ? ` (${data.distance} 公尺)` : "";
-      statusInfo.textContent = "無效打卡區" + distText;
+      statusInfo.textContent = "無效打卡區" +
+        (data.distance ? ` (${data.distance} 公尺)` : "");
 
-      if (isManager) {
-        btnStart.disabled = false;
-        btnEnd.disabled = false;
-      } else {
+      if (!isManager) {
         btnStart.disabled = true;
         btnEnd.disabled = true;
       }
@@ -215,7 +214,7 @@ async function updateStatus() {
 async function updateTodayRecords(){
   todayRecords.innerHTML="載入中...";
   try{
-    const res = await fetch(`${API_ENDPOINT}?action=getToday&userId=${userId}&date=${getTodayString()}`);
+    const res = await fetch(`${API_ENDPOINT}?action=getToday&userId=${userId}`);
     const data = await res.json();
 
     if(!data.length){
@@ -229,64 +228,46 @@ async function updateTodayRecords(){
       let color="#3498db";
       if(r.status==="下班") color="#2ecc71";
       if(r.company.includes("錯誤")) color="#e67e22";
-      todayRecords.innerHTML+=`<span style="border-left-color:${color}">${r.status}：${r.time}（${r.company}）</span>`;
+
+      todayRecords.innerHTML+=
+        `<span style="border-left-color:${color}">
+          ${r.status}：${r.time}（${r.company}）
+        </span>`;
     });
+
   }catch{
     todayRecords.innerHTML="今日打卡紀錄：讀取失敗";
   }
 }
 
-/* ===== LINE 訊息 ===== */
-async function sendSelfMessage(record){
-  if(!liff.isInClient()) return;
+/* ===== LIFF 初始化 ===== */
+async function initUser(){
+  await liff.init({ liffId: "2008786085-L1CtKqqv" });
 
-  let headerColor = "#3498db";
-  if(record.status === "下班") headerColor = "#2ecc71";
-  if(record.rangeStatus !== "有效打卡區") headerColor = "#e67e22";
+  if (!liff.isLoggedIn()) {
+    await liff.login();
+  }
 
-  let reasonText = record.rangeStatus !== "有效打卡區" ? "異常原因：超出打卡區" : "";
+  const profile = await liff.getProfile();
+  userId = profile.userId;
+  userName = profile.displayName;
 
-  try{
-    await liff.sendMessages([{
-      type:'flex',
-      altText:'打卡通知',
-      contents:{
-        type:"bubble",
-        header:{
-          type:"box",
-          layout:"vertical",
-          contents:[{
-            type:"text",
-            text:`${record.userName} 已打卡`,
-            weight:"bold",
-            size:"lg",
-            color:"#ffffff"
-          }],
-          backgroundColor: headerColor,
-          paddingAll:"12px"
-        },
-        body:{
-          type:"box",
-          layout:"vertical",
-          spacing:"md",
-          contents:[
-            {type:"text", text:`狀態：${record.status}`},
-            {type:"text", text:`時間：${record.date} ${record.time}`},
-            {type:"text", text:`位置：${record.company}`},
-            ...(reasonText ? [{type:"text", text: reasonText, color:"#e67e22"}] : [])
-          ]
-        }
-      }
-    }]);
-  // 等待 LINE client flush
-    await new Promise(r => setTimeout(r, 800));
+  userInfo.textContent = `${userName} 您好`;
 
-    console.log("訊息已送出");
+  isManager = MANAGERS.includes(userId);
 
-  }catch(err){
-    console.error("LIFF 訊息傳送失敗:", err);
+  // ===== 主管按鈕（完整修復）=====
+  if (isManager) {
+    const btnApprove = document.getElementById("btnApprove");
+    btnApprove.style.display = "block";
+
+    btnApprove.onclick = () => {
+      window.location.href =
+        "https://script.google.com/macros/s/AKfycbz1FavWzmy5sl8iFCRfp7ZHQ_3EdFhTw_M093XAtq8ISIn9jiWrujfgZjjqRZxorTdkLQ/exec";
+    };
   }
 }
+
 /* ===== 打卡 ===== */
 async function clockInOut(status){
 
@@ -295,12 +276,10 @@ async function clockInOut(status){
     return;
   }
 
-  // ❗ 非主管 + 無效區 → 禁止
   if (lastRangeStatus !== "有效打卡區" && !isManager) {
     Swal.fire({
       icon: "warning",
       title: "目前為無效打卡區",
-      text: "僅主管可打卡",
       timer: 1500,
       showConfirmButton: false
     });
@@ -309,7 +288,6 @@ async function clockInOut(status){
 
   const btn = status==="上班"?btnStart:btnEnd;
   btn.disabled = true;
-  const originalText = btn.textContent;
 
   let sec = 3;
   const timer = setInterval(()=>{
@@ -319,46 +297,36 @@ async function clockInOut(status){
   },1000);
 
   try{
-    if(!lastGPS){
-      Swal.fire({icon:"warning",title:"定位尚未完成",timer:1500,showConfirmButton:false});
-      return;
-    }
-
     const res = await fetch(API_ENDPOINT, {
       method:"POST",
-      body: JSON.stringify({userId,userName,ip:getIP(),gps:lastGPS,status})
+      body: JSON.stringify({
+        userId,
+        userName,
+        ip:getIP(),
+        gps:lastGPS,
+        status
+      })
     });
 
     const data = await res.json();
 
-    const actuallyUpdated = data.message && (data.message.includes("已更新") || data.message.includes("成功"));
+    if(data.message && data.message.includes("成功")){
 
-    if(actuallyUpdated){
-      const record = {
-        userName,
-        status: data.status,
-        date: data.date,
-        time: data.time,
-        company: data.company || "未知",
-        rangeStatus: data.rangeStatus
-      };
+      Swal.fire({
+        icon: data.rangeStatus==="有效打卡區"?"success":"warning",
+        title:"打卡完成",
+        timer:1500,
+        showConfirmButton:false
+      });
 
-      if(data.rangeStatus === "有效打卡區"){
-        Swal.fire({icon:"success",title:"打卡成功",timer:2000,showConfirmButton:false});
-      } else {
-        Swal.fire({icon:"warning",title:"打卡無效",timer:2000,showConfirmButton:false});
-      }
-
-      sendSelfMessage(record);
       updateTodayRecords();
       updateStatus();
     }
 
   }catch(err){
-    Swal.fire({icon:"error",title:"打卡失敗",timer:2000,showConfirmButton:false});
-  } finally {
-    clearInterval(timer);
-    btn.textContent = originalText;
+    Swal.fire({icon:"error",title:"打卡失敗",timer:1500});
+  }finally{
+    btn.textContent = status==="上班"?"上班":"下班";
     btn.disabled = false;
   }
 }
@@ -366,28 +334,22 @@ async function clockInOut(status){
 btnStart.onclick = () => clockInOut("上班");
 btnEnd.onclick = () => clockInOut("下班");
 
-document.getElementById("btnApprove").onclick = () => {
-  window.location.href = "https://script.google.com/macros/s/AKfycbz1FavWzmy5sl8iFCRfp7ZHQ_3EdFhTw_M093XAtq8ISIn9jiWrujfgZjjqRZxorTdkLQ/exec";
-};
-
 /* ===== 載入 ===== */
 window.onload = async () => {
+
   statusInfo.textContent = "定位載入中…";
   statusInfo.style.background = "#95a5a6";
 
   setButtonsLock(true);
 
-  initGPSWatcher();
+  initGPSWatcher();   // 🔥 核心優化
   preloadIP();
 
   await initUser();
-  updateTodayRecords();
+  await updateTodayRecords();
 
   setButtonsLock(false);
   dataReady = true;
-
-  updateStatus();
-  setInterval(updateStatus, 3000);
 };
 </script>
 
