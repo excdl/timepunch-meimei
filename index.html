@@ -79,6 +79,10 @@ async function loadManagers(){
   try{
     const res = await fetch(`${API_ENDPOINT}?action=getManagers`);
     MANAGERS = await res.json();
+    isManager = MANAGERS.includes(userId);
+    if (isManager) {
+      document.getElementById("btnApprove").style.display = "block";
+    }
   }catch(err){
     console.error("讀取主管失敗", err);
     MANAGERS = [];
@@ -123,11 +127,17 @@ function initGPSWatcher(){
 
   navigator.geolocation.watchPosition(
     pos=>{
+      const isFirstLocation = (lastGPS === null); // 檢查是否是第一次取得定位
       gpsAccuracy = pos.coords.accuracy;
       lastGPS = {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude
       };
+      
+      // 🚀 優化點：一旦拿到 GPS，立刻執行狀態更新，不用等 window.onload 的定時器
+      if (isFirstLocation) {
+        updateStatus();
+      }
     },
     err=>console.warn("GPS錯誤:",err),
     {
@@ -151,19 +161,11 @@ async function initUser(){
   userName = profile.displayName;
 
   userInfo.textContent = `${userName} 您好`;
-
-  await loadManagers();
-
-  isManager = MANAGERS.includes(userId);
-
-  if (isManager) {
-    document.getElementById("btnApprove").style.display = "block";
-  }
 }
 
 /* ===== 狀態 ===== */
 async function updateStatus() {
-
+  // 如果還沒拿到 GPS，就繼續維持定位中
   if (!lastGPS) {
     statusInfo.textContent = "定位中…";
     statusInfo.style.background = "#95a5a6";
@@ -278,24 +280,20 @@ async function sendSelfMessage(record){
         }
       }
     }]);
-  // 等待 LINE client flush
     await new Promise(r => setTimeout(r, 800));
-
     console.log("訊息已送出");
-
   }catch(err){
     console.error("LIFF 訊息傳送失敗:", err);
   }
 }
+
 /* ===== 打卡 ===== */
 async function clockInOut(status){
-
   if(!dataReady || !statusLoaded){
     Swal.fire({icon:"info",title:"資料讀取中或定位中",timer:1500,showConfirmButton:false});
     return;
   }
 
-  // ❗ 非主管 + 無效區 → 禁止
   if (lastRangeStatus !== "有效打卡區" && !isManager) {
     Swal.fire({
       icon: "warning",
@@ -330,7 +328,6 @@ async function clockInOut(status){
     });
 
     const data = await res.json();
-
     const actuallyUpdated = data.message && (data.message.includes("已更新") || data.message.includes("成功"));
 
     if(actuallyUpdated){
@@ -374,19 +371,32 @@ document.getElementById("btnApprove").onclick = () => {
 window.onload = async () => {
   statusInfo.textContent = "定位載入中…";
   statusInfo.style.background = "#95a5a6";
-
   setButtonsLock(true);
 
+  // 1. 優先啟動不需要等待的最快任務（GPS 與 IP 預載）
   initGPSWatcher();
   preloadIP();
 
-  await initUser();
-  updateTodayRecords();
+  try {
+    // 2. 核心：平行執行 LIFF 初始化，完成後立刻解鎖按鈕
+    await initUser();
+    setButtonsLock(false);
+    dataReady = true;
 
-  setButtonsLock(false);
-  dataReady = true;
+    // 3. 次要任務：不阻礙主流程，丟到背景平行fetch（讀取紀錄與主管名單）
+    Promise.all([
+      updateTodayRecords(),
+      loadManagers()
+    ]).then(() => {
+      // 載入完主管名單後，若 GPS 已經拿到，再次更新一次狀態確認權限
+      if(lastGPS) updateStatus();
+    });
 
-  updateStatus();
+  } catch (error) {
+    console.error("初始化失敗", error);
+  }
+
+  // 4. 定時器維持不變
   setInterval(updateStatus, 3000);
 };
 </script>
