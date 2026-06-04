@@ -287,7 +287,6 @@ async function sendSelfMessage(record){
 
 /* ===== 打卡 ===== */
 async function clockInOut(status){
-  // 1. 基本防禦檢查
   if(!dataReady || !statusLoaded){
     Swal.fire({icon:"info",title:"資料讀取中或定位中",timer:1500,showConfirmButton:false});
     return;
@@ -304,31 +303,23 @@ async function clockInOut(status){
     return;
   }
 
-  if(!lastGPS){
-    Swal.fire({icon:"warning",title:"定位尚未完成",timer:1500,showConfirmButton:false});
-    return;
-  }
-
-  // 2. 鎖定按鈕並啟動倒數計時
   const btn = status==="上班"?btnStart:btnEnd;
   btn.disabled = true;
   const originalText = btn.textContent;
 
   let sec = 3;
-  btn.textContent = `打卡中… ${sec}s`;
-  sec--;
-
   const timer = setInterval(()=>{
-    if(sec < 0) {
-      clearInterval(timer);
-      return;
-    }
     btn.textContent = `打卡中… ${sec}s`;
     sec--;
-  }, 1000);
+    if(sec<0) clearInterval(timer);
+  },1000);
 
-  // 3. 執行打卡請求
   try{
+    if(!lastGPS){
+      Swal.fire({icon:"warning",title:"定位尚未完成",timer:1500,showConfirmButton:false});
+      return;
+    }
+
     const res = await fetch(API_ENDPOINT, {
       method:"POST",
       body: JSON.stringify({userId,userName,ip:getIP(),gps:lastGPS,status})
@@ -353,16 +344,14 @@ async function clockInOut(status){
         Swal.fire({icon:"warning",title:"打卡無效",timer:2000,showConfirmButton:false});
       }
 
-      await sendSelfMessage(record);
-      await updateTodayRecords();
-      await updateStatus(true);
+      sendSelfMessage(record);
+      updateTodayRecords();
+      updateStatus();
     }
 
   }catch(err){
-    console.error("打卡異常:", err);
     Swal.fire({icon:"error",title:"打卡失敗",timer:2000,showConfirmButton:false});
   } finally {
-    // 4. 無論成功或失敗，必定清除計時器並還原按鈕
     clearInterval(timer);
     btn.textContent = originalText;
     btn.disabled = false;
@@ -371,9 +360,6 @@ async function clockInOut(status){
 
 btnStart.onclick = () => clockInOut("上班");
 btnEnd.onclick = () => clockInOut("下班");
-
-// 點擊今日打卡紀錄區塊可手動刷新紀錄
-todayRecords.onclick = () => updateTodayRecords();
 
 document.getElementById("btnApprove").onclick = () => {
   window.location.href = "https://script.google.com/macros/s/AKfycbz1FavWzmy5sl8iFCRfp7ZHQ_3EdFhTw_M093XAtq8ISIn9jiWrujfgZjjqRZxorTdkLQ/exec";
