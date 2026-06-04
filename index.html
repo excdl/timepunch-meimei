@@ -14,11 +14,16 @@ body {font-family:"Arial","Noto Sans TC",sans-serif;background:#f0f4f8;display:f
 #statusInfo {font-size:20px;color:white;padding:8px 25px;border-radius:25px;text-align:center;min-width:180px;}
 .buttons-container {display:flex;gap:15px;width:100%;}
 .buttons-container button {flex:1;padding:15px 0;font-size:22px;font-weight:bold;border-radius:12px;border:none;cursor:pointer;color:white;transition:all 0.2s;}
-#btnStart {background: linear-gradient(135deg, #3498db, #2980b9);}
-#btnEnd {background: linear-gradient(135deg, #2ecc71, #27ae60);}
+
+/* 🟠 上班紐：改成亮眼橘色 */
+#btnStart {background: linear-gradient(135deg, #f39c12, #e67e22);}
+/* 🔵 下班紐：改成上班原本的藍色 */
+#btnEnd {background: linear-gradient(135deg, #3498db, #2980b9);}
+
 button:disabled {opacity:0.5;cursor:not-allowed;}
 #todayRecords {width:100%;background:#fafafa;border-radius:14px;padding:15px;border:1px solid #ddd;font-size:18px;text-align:left;}
 #todayRecords span {display:block;margin-bottom:5px;padding-left:5px;border-left:3px solid #3498db;}
+
 /* 主管審批按鈕 */
 #btnApprove {
     margin-top:10px;
@@ -94,7 +99,7 @@ function getTodayString(){
   return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 }
 
-/* ===== 按鈕狀態還原與文字鎖定 ===== */
+/* ===== 按鈕狀態還原與文字鎖定 (優化直覺防呆) ===== */
 function setButtonsLock(lock, textStart = "上班", textEnd = "下班"){
   btnStart.disabled = lock;
   btnEnd.disabled = lock;
@@ -136,7 +141,7 @@ function initGPSWatcher(){
       };
       
       if (isFirstLocation) {
-        updateStatus(true); // 第一次取得定位，強制更新狀態
+        updateStatus(true); // 第一次定位成功，強制刷狀態
       }
     },
     err=>console.warn("GPS錯誤:",err),
@@ -163,7 +168,7 @@ async function initUser(){
   userInfo.textContent = `${userName} 您好`;
 }
 
-/* ===== 狀態 (新增 forceRefresh 參數，解決 LINE 訊息被攔截問題) ===== */
+/* ===== 狀態 (支援強制更新，避開快取攔截問題) ===== */
 async function updateStatus(forceRefresh = false) {
   if (!lastGPS) {
     statusInfo.textContent = "定位中…";
@@ -182,7 +187,6 @@ async function updateStatus(forceRefresh = false) {
     const newStatus = data.rangeStatus;
     if (!newStatus) return;
 
-    // 如果不是強制重新整理，且狀態與上次相同，則略過（定時器優化用）
     if (!forceRefresh && newStatus === lastRangeStatus) return;
     lastRangeStatus = newStatus;
 
@@ -238,8 +242,9 @@ async function updateTodayRecords(){
 async function sendSelfMessage(record){
   if(!liff.isInClient()) return;
 
-  let headerColor = "#3498db";
-  if(record.status === "下班") headerColor = "#2ecc71";
+  // 配合按鈕調色，LINE 訊息通知的頁首顏色也同步調整
+  let headerColor = "#f39c12"; // 上班：橘色
+  if(record.status === "下班") headerColor = "#3498db"; // 下班：藍色
   if(record.rangeStatus !== "有效打卡區") headerColor = "#e67e22";
 
   let reasonText = record.rangeStatus !== "有效打卡區" ? "異常原因：超出打卡區" : "";
@@ -342,11 +347,11 @@ async function clockInOut(status){
         Swal.fire({icon:"warning",title:"打卡無效",timer:2000,showConfirmButton:false});
       }
 
-      // 1. 強制發送 LINE 訊息
+      // 1. 強制送出 LINE 訊息
       await sendSelfMessage(record);
-      // 2. 更新本日紀錄
+      // 2. 更新紀錄
       await updateTodayRecords();
-      // 3. 💥 重點：傳入 true 強制重整區域狀態快取，讓介面即時反應
+      // 3. 強制解除狀態快取重整畫面
       await updateStatus(true);
     }
 
@@ -370,7 +375,7 @@ document.getElementById("btnApprove").onclick = () => {
 window.onload = async () => {
   statusInfo.textContent = "定位載入中…";
   statusInfo.style.background = "#95a5a6";
-  setButtonsLock(true, "載入中...", "載入中...");
+  setButtonsLock(true, "系統載入中...", "系統載入中...");
 
   initGPSWatcher();
   preloadIP();
@@ -383,16 +388,17 @@ window.onload = async () => {
       updateTodayRecords(),
       loadManagers()
     ]).then(() => {
-      if(lastGPS) updateStatus(true); // 載入完畢後強制刷新一次狀態
+      if(lastGPS) updateStatus(true); // 載入完畢後強制更新一次狀態確認權限
     });
 
   } catch (error) {
     console.error("初始化失敗", error);
   }
 
-  // 背景循環監聽則維持不強制刷新，節省效能
+  // 背景定時器維持防刷新（不浪費網路資源）
   setInterval(() => updateStatus(false), 3000);
 };
 </script>
 </body>
 </html>
+
