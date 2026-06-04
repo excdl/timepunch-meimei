@@ -130,7 +130,7 @@ function initGPSWatcher(){
 
   navigator.geolocation.watchPosition(
     pos=>{
-      const isFirstLocation = (lastGPS === null);
+      const isFirstLocation = (lastGPS === null); // 檢查是否是第一次取得定位
       gpsAccuracy = pos.coords.accuracy;
       lastGPS = {
         lat: pos.coords.latitude,
@@ -329,7 +329,7 @@ async function clockInOut(status){
     });
 
     const data = await res.json();
-    const actuallyUpdated = data.message && (data.message.includes("已更新") || data.message.includes("成功"));
+    const actuallyUpdated = data.message && (data.message.includes("打卡資料已更新") || data.message.includes("成功") || data.message.includes("已更新"));
 
     if(actuallyUpdated){
       const record = {
