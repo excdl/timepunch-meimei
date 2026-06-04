@@ -238,14 +238,14 @@ async function updateTodayRecords(){
   }
 }
 
-/* ===== LINE 訊息 ===== */
+/* ===== LINE 訊息 (回復顏色維持不變) ===== */
 async function sendSelfMessage(record){
   if(!liff.isInClient()) return;
 
-  // 配合按鈕調色，LINE 訊息通知的頁首顏色也同步調整
-  let headerColor = "#f39c12"; // 上班：橘色
-  if(record.status === "下班") headerColor = "#3498db"; // 下班：藍色
-  if(record.rangeStatus !== "有效打卡區") headerColor = "#e67e22";
+  // 🟢 訊息顏色維持原樣：上班藍色、下班綠色
+  let headerColor = "#3498db"; // 上班：經典藍
+  if(record.status === "下班") headerColor = "#2ecc71"; // 下班：清新綠
+  if(record.rangeStatus !== "有效打卡區") headerColor = "#e67e22"; // 異常：橘色
 
   let reasonText = record.rangeStatus !== "有效打卡區" ? "異常原因：超出打卡區" : "";
 
