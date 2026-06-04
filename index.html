@@ -15,9 +15,9 @@ body {font-family:"Arial","Noto Sans TC",sans-serif;background:#f0f4f8;display:f
 .buttons-container {display:flex;gap:15px;width:100%;}
 .buttons-container button {flex:1;padding:15px 0;font-size:22px;font-weight:bold;border-radius:12px;border:none;cursor:pointer;color:white;transition:all 0.2s;}
 
-/* 🟠 上班按鈕：橘色 */
+/* 🟠 上班紐：改成亮眼橘色 */
 #btnStart {background: linear-gradient(135deg, #f39c12, #e67e22);}
-/* 🔵 下班按鈕：藍色 */
+/* 🔵 下班紐：改成上班原本的藍色 */
 #btnEnd {background: linear-gradient(135deg, #3498db, #2980b9);}
 
 button:disabled {opacity:0.5;cursor:not-allowed;}
@@ -71,9 +71,6 @@ let gpsAccuracy = null;
 let cachedIP = "";
 let lastRangeStatus = null;
 
-// 儲存全域倒數計時器變數，避免重複宣告與殘留
-let clockTimer = null;
-
 const btnStart=document.getElementById("btnStart");
 const btnEnd=document.getElementById("btnEnd");
 const userInfo=document.getElementById("userInfo");
@@ -102,7 +99,7 @@ function getTodayString(){
   return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 }
 
-/* ===== 按鈕狀態還原與文字鎖定 ===== */
+/* ===== 按鈕狀態還原與文字鎖定 (優化直覺防呆) ===== */
 function setButtonsLock(lock, textStart = "上班", textEnd = "下班"){
   btnStart.disabled = lock;
   btnEnd.disabled = lock;
@@ -144,7 +141,7 @@ function initGPSWatcher(){
       };
       
       if (isFirstLocation) {
-        updateStatus(true); 
+        updateStatus(true); // 第一次定位成功，強制刷狀態
       }
     },
     err=>console.warn("GPS錯誤:",err),
@@ -171,11 +168,8 @@ async function initUser(){
   userInfo.textContent = `${userName} 您好`;
 }
 
-/* ===== 狀態 ===== */
+/* ===== 狀態 (支援強制更新，避開快取攔截問題) ===== */
 async function updateStatus(forceRefresh = false) {
-  // 如果正在打卡倒數中，由打卡函式控制按鈕，這裡不干擾介面文字
-  if (clockTimer !== null) return;
-
   if (!lastGPS) {
     statusInfo.textContent = "定位中…";
     statusInfo.style.background = "#95a5a6";
@@ -244,12 +238,13 @@ async function updateTodayRecords(){
   }
 }
 
-/* ===== LINE 訊息 (回復顏色不變) ===== */
+/* ===== LINE 訊息 ===== */
 async function sendSelfMessage(record){
   if(!liff.isInClient()) return;
 
-  let headerColor = "#3498db"; // 上班藍
-  if(record.status === "下班") headerColor = "#2ecc71"; // 下班綠
+  // 配合按鈕調色，LINE 訊息通知的頁首顏色也同步調整
+  let headerColor = "#f39c12"; // 上班：橘色
+  if(record.status === "下班") headerColor = "#3498db"; // 下班：藍色
   if(record.rangeStatus !== "有效打卡區") headerColor = "#e67e22";
 
   let reasonText = record.rangeStatus !== "有效打卡區" ? "異常原因：超出打卡區" : "";
@@ -311,30 +306,16 @@ async function clockInOut(status){
     return;
   }
 
-  // 確保清除上一個可能殘留的計時器
-  if (clockTimer) {
-    clearInterval(clockTimer);
-    clockTimer = null;
-  }
-
   const btn = status==="上班"?btnStart:btnEnd;
   btn.disabled = true;
   const originalText = btn.textContent;
 
-  // 啟動倒數計時
   let sec = 3;
-  btn.textContent = `打卡中… ${sec}s`;
-  
-  clockTimer = setInterval(()=>{
+  const timer = setInterval(()=>{
+    btn.textContent = `打卡中… ${sec}s`;
     sec--;
-    if(sec <= 0){
-      clearInterval(clockTimer);
-      clockTimer = null;
-      btn.textContent = `打卡中…`;
-    } else {
-      btn.textContent = `打卡中… ${sec}s`;
-    }
-  }, 1000);
+    if(sec<0) clearInterval(timer);
+  },1000);
 
   try{
     if(!lastGPS){
@@ -366,23 +347,20 @@ async function clockInOut(status){
         Swal.fire({icon:"warning",title:"打卡無效",timer:2000,showConfirmButton:false});
       }
 
+      // 1. 強制送出 LINE 訊息
       await sendSelfMessage(record);
+      // 2. 更新紀錄
       await updateTodayRecords();
+      // 3. 強制解除狀態快取重整畫面
+      await updateStatus(true);
     }
 
   }catch(err){
     Swal.fire({icon:"error",title:"打卡失敗",timer:2000,showConfirmButton:false});
   } finally {
-    // 💥 關鍵修復：API 回傳後立刻清除計時器，避免重複倒數
-    if (clockTimer) {
-      clearInterval(clockTimer);
-      clockTimer = null;
-    }
+    clearInterval(timer);
     btn.textContent = originalText;
     btn.disabled = false;
-    
-    // 計時器完全清除後，才重新獲取最新狀態更新按鈕文字
-    await updateStatus(true);
   }
 }
 
@@ -410,13 +388,14 @@ window.onload = async () => {
       updateTodayRecords(),
       loadManagers()
     ]).then(() => {
-      if(lastGPS) updateStatus(true);
+      if(lastGPS) updateStatus(true); // 載入完畢後強制更新一次狀態確認權限
     });
 
   } catch (error) {
     console.error("初始化失敗", error);
   }
 
+  // 背景定時器維持防刷新（不浪費網路資源）
   setInterval(() => updateStatus(false), 3000);
 };
 </script>
