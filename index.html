@@ -37,7 +37,6 @@ button:disabled {opacity:0.5;cursor:not-allowed;}
     transform: translateY(-2px);
     box-shadow: 0 4px 10px rgba(0,0,0,0.1);
 }
-
 </style>
 </head>
 <body>
@@ -46,8 +45,8 @@ button:disabled {opacity:0.5;cursor:not-allowed;}
   <div id="statusInfo">定位確認中…</div>
   <div id="dateTime">載入中…</div>
   <div class="buttons-container">
-    <button id="btnStart" disabled>上班</button>
-    <button id="btnEnd" disabled>下班</button>
+    <button id="btnStart" disabled>定位中…</button>
+    <button id="btnEnd" disabled>定位中…</button>
   </div>
   <div id="todayRecords">今日打卡紀錄（點擊更新）</div>
   <button id="btnApprove">查看 | 簽核</button>
@@ -95,10 +94,12 @@ function getTodayString(){
   return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
 }
 
-/* ===== 按鈕鎖定 ===== */
-function setButtonsLock(lock){
-  btnStart.disabled=lock;
-  btnEnd.disabled=lock;
+/* ===== 按鈕狀態還原與文字鎖定 ===== */
+function setButtonsLock(lock, textStart = "上班", textEnd = "下班"){
+  btnStart.disabled = lock;
+  btnEnd.disabled = lock;
+  btnStart.textContent = textStart;
+  btnEnd.textContent = textEnd;
 }
 
 /* ===== 時間 ===== */
@@ -127,16 +128,15 @@ function initGPSWatcher(){
 
   navigator.geolocation.watchPosition(
     pos=>{
-      const isFirstLocation = (lastGPS === null); // 檢查是否是第一次取得定位
+      const isFirstLocation = (lastGPS === null); 
       gpsAccuracy = pos.coords.accuracy;
       lastGPS = {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude
       };
       
-      // 🚀 優化點：一旦拿到 GPS，立刻執行狀態更新，不用等 window.onload 的定時器
       if (isFirstLocation) {
-        updateStatus();
+        updateStatus(true); // 第一次取得定位，強制更新狀態
       }
     },
     err=>console.warn("GPS錯誤:",err),
@@ -163,12 +163,12 @@ async function initUser(){
   userInfo.textContent = `${userName} 您好`;
 }
 
-/* ===== 狀態 ===== */
-async function updateStatus() {
-  // 如果還沒拿到 GPS，就繼續維持定位中
+/* ===== 狀態 (新增 forceRefresh 參數，解決 LINE 訊息被攔截問題) ===== */
+async function updateStatus(forceRefresh = false) {
   if (!lastGPS) {
     statusInfo.textContent = "定位中…";
     statusInfo.style.background = "#95a5a6";
+    setButtonsLock(true, "定位中…", "定位中…");
     statusLoaded = false;
     return;
   }
@@ -182,27 +182,23 @@ async function updateStatus() {
     const newStatus = data.rangeStatus;
     if (!newStatus) return;
 
-    if (newStatus === lastRangeStatus) return;
+    // 如果不是強制重新整理，且狀態與上次相同，則略過（定時器優化用）
+    if (!forceRefresh && newStatus === lastRangeStatus) return;
     lastRangeStatus = newStatus;
 
     if (newStatus === "有效打卡區") {
       statusInfo.style.background = "#2ecc71";
       statusInfo.textContent = "有效打卡區";
-
-      btnStart.disabled = false;
-      btnEnd.disabled = false;
-
+      setButtonsLock(false, "上班", "下班");
     } else {
       statusInfo.style.background = "#e74c3c";
       const distText = data.distance ? ` (${data.distance} 公尺)` : "";
       statusInfo.textContent = "無效打卡區" + distText;
 
       if (isManager) {
-        btnStart.disabled = false;
-        btnEnd.disabled = false;
+        setButtonsLock(false, "上班 (主管特權)", "下班 (主管特權)");
       } else {
-        btnStart.disabled = true;
-        btnEnd.disabled = true;
+        setButtonsLock(true, "上班", "下班");
       }
     }
 
@@ -346,9 +342,12 @@ async function clockInOut(status){
         Swal.fire({icon:"warning",title:"打卡無效",timer:2000,showConfirmButton:false});
       }
 
-      sendSelfMessage(record);
-      updateTodayRecords();
-      updateStatus();
+      // 1. 強制發送 LINE 訊息
+      await sendSelfMessage(record);
+      // 2. 更新本日紀錄
+      await updateTodayRecords();
+      // 3. 💥 重點：傳入 true 強制重整區域狀態快取，讓介面即時反應
+      await updateStatus(true);
     }
 
   }catch(err){
@@ -371,36 +370,29 @@ document.getElementById("btnApprove").onclick = () => {
 window.onload = async () => {
   statusInfo.textContent = "定位載入中…";
   statusInfo.style.background = "#95a5a6";
-  setButtonsLock(true);
+  setButtonsLock(true, "系統載入中...", "系統載入中...");
 
-  // 1. 優先啟動不需要等待的最快任務（GPS 與 IP 預載）
   initGPSWatcher();
   preloadIP();
 
   try {
-    // 2. 核心：平行執行 LIFF 初始化，完成後立刻解鎖按鈕
     await initUser();
-    setButtonsLock(false);
     dataReady = true;
 
-    // 3. 次要任務：不阻礙主流程，丟到背景平行fetch（讀取紀錄與主管名單）
     Promise.all([
       updateTodayRecords(),
       loadManagers()
     ]).then(() => {
-      // 載入完主管名單後，若 GPS 已經拿到，再次更新一次狀態確認權限
-      if(lastGPS) updateStatus();
+      if(lastGPS) updateStatus(true); // 載入完畢後強制刷新一次狀態
     });
 
   } catch (error) {
     console.error("初始化失敗", error);
   }
 
-  // 4. 定時器維持不變
-  setInterval(updateStatus, 3000);
+  // 背景循環監聽則維持不強制刷新，節省效能
+  setInterval(() => updateStatus(false), 3000);
 };
 </script>
-
-
 </body>
 </html>
