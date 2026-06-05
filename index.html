@@ -198,7 +198,7 @@ async function updateStatus(forceRefresh = false) {
       statusInfo.textContent = "無效打卡區" + distText;
 
       if (isManager) {
-        setButtonsLock(false, "上班 (主管特權)", "下班 (主管特權)");
+        setButtonsLock(false, "上班 (主管)", "下班 (主管)");
       } else {
         setButtonsLock(true, "上班", "下班");
       }
