@@ -8,7 +8,7 @@
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <style>
 body {font-family:"Arial","Noto Sans TC",sans-serif;background:#f0f4f8;display:flex;justify-content:center;padding:20px;margin:0;}
-.card {background:#fff;width:95%;max-width:480px;border-radius:20px;padding:25px 20px;display:flex;flex-direction:column;align-items:center;gap:20px;box-shadow:0 15px 30px rgba(0,0,0,0.15);}
+.card {background:#fff;width:95%;max-width:480px;border-radius:20px;padding:25px 20px;display:flex;flex-direction:column;align-items:center;gap:20px;box-shadow:0 15px 30px rgba(0,0,0,0.15);box-sizing: border-box;}
 #userInfo {font-size:28px;font-weight:bold;text-align:center;color:#2c3e50;}
 #dateTime {font-size:22px;color:#7f8c8d;text-align:center;}
 #statusInfo {font-size:20px;color:white;padding:8px 25px;border-radius:25px;text-align:center;min-width:180px;}
@@ -20,7 +20,7 @@ body {font-family:"Arial","Noto Sans TC",sans-serif;background:#f0f4f8;display:f
 #btnEnd {background: linear-gradient(135deg, #3498db, #2980b9);}
 
 button:disabled {opacity:0.5;cursor:not-allowed;}
-#todayRecords {width:100%;background:#fafafa;border-radius:14px;padding:15px;border:1px solid #ddd;font-size:18px;text-align:left;}
+#todayRecords {width:100%;background:#fafafa;border-radius:14px;padding:15px;border:1px solid #ddd;font-size:18px;text-align:left;box-sizing: border-box;}
 #todayRecords span {display:block;margin-bottom:5px;padding-left:5px;border-left:3px solid #3498db;}
 
 /* 主管審批按鈕 */
@@ -41,10 +41,43 @@ button:disabled {opacity:0.5;cursor:not-allowed;}
     transform: translateY(-2px);
     box-shadow: 0 4px 10px rgba(0,0,0,0.1);
 }
+
+/* ===================================================
+   ✨ 骨架螢幕 (Skeleton Screen) 專用樣式 
+   =================================================== */
+@keyframes skeleton-pulse {
+  0% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+.skeleton-item {
+  background: linear-gradient(90deg, #f2f2f2 25%, #e6e6e6 37%, #f2f2f2 63%);
+  background-size: 400% 100%;
+  animation: skeleton-pulse 1.4s ease infinite;
+  border-radius: 4px;
+}
+.sk-user { width: 70%; height: 32px; border-radius: 8px; }
+.sk-status { width: 50%; height: 38px; border-radius: 25px; }
+.sk-time { width: 60%; height: 26px; border-radius: 6px; }
+.sk-btn { flex: 1; height: 56px; border-radius: 12px; }
+.sk-records { width: 100%; height: 110px; border-radius: 14px; box-sizing: border-box; }
 </style>
 </head>
 <body>
-<div class="card">
+
+<!-- 1. 骨架螢幕容器 (初始化載入時優先顯示) -->
+<div id="skeleton-container" class="card">
+  <div class="skeleton-item sk-user"></div>
+  <div class="skeleton-item sk-status"></div>
+  <div class="skeleton-item sk-time"></div>
+  <div class="buttons-container">
+    <div class="skeleton-item sk-btn"></div>
+    <div class="skeleton-item sk-btn"></div>
+  </div>
+  <div class="skeleton-item sk-records"></div>
+</div>
+
+<!-- 2. 真實網頁內容 (初始化完成前先隱藏) -->
+<div id="main-content" class="card" style="display: none;">
   <div id="userInfo">載入使用者資訊中...</div>
   <div id="statusInfo">定位確認中…</div>
   <div id="dateTime">載入中…</div>
@@ -76,6 +109,19 @@ const userInfo=document.getElementById("userInfo");
 const statusInfo=document.getElementById("statusInfo");
 const dateTime=document.getElementById("dateTime");
 const todayRecords=document.getElementById("todayRecords");
+
+/* ===== ⚙️ 骨架螢幕控制輔助函式 ===== */
+function toggleSkeleton(showSkeleton) {
+  const skeleton = document.getElementById("skeleton-container");
+  const mainContent = document.getElementById("main-content");
+  if (showSkeleton) {
+    skeleton.style.display = "flex";
+    mainContent.style.display = "none";
+  } else {
+    skeleton.style.display = "none";
+    mainContent.style.display = "flex";
+  }
+}
 
 /* ===== 讀取主管 ===== */
 async function loadManagers(){
@@ -369,7 +415,10 @@ document.getElementById("btnApprove").onclick = () => {
 window.onload = async () => {
   statusInfo.textContent = "定位載入中…";
   statusInfo.style.background = "#95a5a6";
-  setButtonsLock(true, "系統載入中...", "系統載入中...");
+  setButtonsLock(true, "同步中...", "同步中...");
+
+  // 確保在載入初始化開始時，顯示骨架螢幕
+  toggleSkeleton(true);
 
   initGPSWatcher();
   preloadIP();
@@ -387,6 +436,9 @@ window.onload = async () => {
 
   } catch (error) {
     console.error("初始化失敗", error);
+  } finally {
+    // ✨ 無論成功或失敗，初始化流程結束後即關閉骨架螢幕，顯示真實介面
+    toggleSkeleton(false);
   }
 };
 </script>
