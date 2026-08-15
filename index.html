@@ -285,7 +285,7 @@ async function sendSelfMessage(record){
   }
 }
 
-/* ===== 打卡 ===== */
+/* ===== 優化後的打卡函式 ===== */
 async function clockInOut(status){
   if(!dataReady || !statusLoaded){
     Swal.fire({icon:"info",title:"資料讀取中或定位中",timer:1500,showConfirmButton:false});
@@ -307,56 +307,89 @@ async function clockInOut(status){
   btn.disabled = true;
   const originalText = btn.textContent;
 
-  let sec = 3;
-  const timer = setInterval(()=>{
-    btn.textContent = `打卡中… ${sec}s`;
-    sec--;
-    if(sec<0) clearInterval(timer);
-  },1000);
+  // 顯示處理中的載入提示視窗，避免畫面死當無回應
+  // 專業商務風格載入提示
+    Swal.fire({
+        html: `
+            <div style="padding: 10px 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+                <!-- 專業圓形脈衝載入動畫 -->
+                <div class="custom-loader-spinner" style="
+                    width: 50px;
+                    height: 50px;
+                    margin: 0 auto 18px auto;
+                    border: 4px solid #f3f3f3;
+                    border-top: 4px solid #3498db;
+                    border-radius: 50%;
+                    animation: spin 0.8s linear infinite;
+                "></div>
+                <h3 style="margin: 0 0 8px 0; color: #2c3e50; font-size: 20px; font-weight: 600;">系統打卡處理中</h3>
+                <p style="margin: 0; color: #7f8c8d; font-size: 14px; letter-spacing: 0.5px;">正在與雲端伺服器安全同步，請稍候...</p>
+                <style>
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                </style>
+            </div>
+        `,
+        showConfirmButton: false,
+        allowOutsideClick: false,
+        background: '#ffffff',
+        backdrop: 'rgba(0, 0, 0, 0.45)',
+        customClass: {
+            popup: 'professional-swal-popup'
+        }
+    });
 
   try{
-    if(!lastGPS){
-      Swal.fire({icon:"warning",title:"定位尚未完成",timer:1500,showConfirmButton:false});
-      return;
-    }
-
     const res = await fetch(API_ENDPOINT, {
       method:"POST",
-      body: JSON.stringify({userId,userName,ip:getIP(),gps:lastGPS,status})
+      body: JSON.stringify({
+        userId, 
+        userName, 
+        ip: getIP(), 
+        gps: lastGPS || { lat: "", lng: "" }, 
+        status
+      })
     });
 
     const data = await res.json();
-    const actuallyUpdated = data.message && (data.message.includes("已更新") || data.message.includes("成功"));
-
-    if(actuallyUpdated){
+    
+    // 放寬判斷條件，只要後端有回傳訊息就算成功或已處理
+    if(data && data.message){
       const record = {
         userName,
-        status: data.status,
+        status: data.status || status,
         date: data.date,
         time: data.time,
         company: data.company || "未知",
         rangeStatus: data.rangeStatus
       };
 
-      if(data.rangeStatus === "有效打卡區"){
-        Swal.fire({icon:"success",title:"打卡成功",timer:2000,showConfirmButton:false});
+      if(data.message.includes("錯誤")){
+        Swal.fire({icon:"error",title: data.message, timer: 2000, showConfirmButton: false});
+      } else if(data.rangeStatus === "有效打卡區"){
+        Swal.fire({icon:"success", title: data.message || "打卡成功", timer: 2000, showConfirmButton: false});
       } else {
-        Swal.fire({icon:"warning",title:"打卡無效",timer:2000,showConfirmButton:false});
+        Swal.fire({icon:"warning", title: data.message || "打卡無效", timer: 2000, showConfirmButton: false});
       }
 
       sendSelfMessage(record);
       updateTodayRecords();
-      updateStatus();
+      updateStatus(true);
+    } else {
+      Swal.fire({icon:"error", title:"伺服器回應異常", timer: 2000, showConfirmButton: false});
     }
 
   }catch(err){
-    Swal.fire({icon:"error",title:"打卡失敗",timer:2000,showConfirmButton:false});
+    console.error("打卡發生錯誤:", err);
+    Swal.fire({icon:"error", title:"打卡連線失敗", text: "請檢查網路狀態後再試一次", timer: 2000, showConfirmButton: false});
   } finally {
-    clearInterval(timer);
     btn.textContent = originalText;
     btn.disabled = false;
   }
 }
+
 
 btnStart.onclick = () => clockInOut("上班");
 btnEnd.onclick = () => clockInOut("下班");
