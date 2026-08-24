@@ -565,17 +565,41 @@ async function clockInOut(status) {
         const data = await res.json();
 
         if (data && data.message) {
-            const record = { userName, status: data.status || status, date: data.date, time: data.time, company: data.company || "未知", rangeStatus: data.rangeStatus };
+            // 🛡️ 防禦性檢查：確保後端回傳的狀態與時間都有值，若無則捨棄或補預設值
+            const currentStatus = data.status || status;
+            const currentDate = data.date;
+            const currentTime = data.time;
+            const currentRangeStatus = data.rangeStatus;
+
             if (data.message.includes("錯誤")) {
                 Swal.fire({ icon: "error", title: data.message, timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
-            } else if (data.rangeStatus === "有效打卡區") {
+                return; // 錯誤直接終止，不發送訊息
+            } else if (currentRangeStatus === "有效打卡區") {
                 Swal.fire({ icon: "success", title: data.message || "打卡成功", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
             } else {
                 Swal.fire({ icon: "warning", title: data.message || "打卡無效", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
             }
-            sendSelfMessage(record);
+
+            // 🛡️ 只有在關鍵資料完整時才包裝發送
+            if (currentDate && currentTime && currentRangeStatus) {
+                const record = { 
+                    userName, 
+                    status: currentStatus, 
+                    date: currentDate, 
+                    time: currentTime, 
+                    company: data.company || "未知", 
+                    rangeStatus: currentRangeStatus 
+                };
+                sendSelfMessage(record);
+            }
+
             updateTodayRecords();
-            updateStatus(true);
+            
+            // 🕒 延遲 3 秒後再更新狀態，避免打卡瞬間的 GPS 微幅飄移導致狀態誤判
+            setTimeout(() => {
+                updateStatus(true);
+            }, 3000);
+
         } else {
             Swal.fire({ icon: "error", title: "伺服器回應異常", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
         }
