@@ -564,7 +564,7 @@
             btnEnd.disabled = false;
         }
 
-        // ====== 打卡動作執行（動畫與 API 同步） ======
+        // ====== 打卡動作執行（極致流暢動畫與 API 同步） ======
         async function clockInOut(status) {
             if (!dataReady || !statusLoaded) {
                 Swal.fire({ icon: "info", title: "資料讀取中或定位中", timer: 1500, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -602,8 +602,11 @@
                 circle.style.strokeDashoffset = circumference;
 
                 function animate() {
-                    const targetProgress = apiCompleted ? 1 : 0.9;
-                    progress += (targetProgress - progress) * 0.15;
+                    // 若 API 已完成則目標為 1（補滿），未完成則平順推進至 85% 等待
+                    const targetProgress = apiCompleted ? 1 : 0.85;
+                    // 使用線性勻速（加上微調系數），讓轉圈過程維持絕對流暢、不卡頓
+                    progress += (targetProgress - progress) * 0.12;
+                    if (!apiCompleted && progress > 0.83) progress = 0.83; // 確保 API 沒回來前不會到底
                     
                     circle.style.strokeDashoffset = circumference * (1 - progress);
                     const rC = Math.round(startColor.r*(1-progress) + endColor.r*progress);
@@ -611,14 +614,14 @@
                     const bC = Math.round(startColor.b*(1-progress) + endColor.b*progress);
                     circle.style.stroke = `rgb(${rC},${gC},${bC})`;
 
-                    if (progress > 0.99 && apiCompleted) {
-                        wrapper.style.transition = "opacity 0.3s";
+                    if (progress > 0.98 && apiCompleted) {
+                        wrapper.style.transition = "opacity 0.25s";
                         wrapper.style.opacity = 0;
                         setTimeout(() => {
                             wrapper.style.display = "none";
                             wrapper.style.opacity = 1;
                             showResult(apiData, status);
-                        }, 300);
+                        }, 250);
                     } else {
                         requestAnimationFrame(animate);
                     }
@@ -636,7 +639,7 @@
                 console.error("打卡發生錯誤:", err);
                 apiData = { message: "打卡連線失敗" };
             } finally {
-                apiCompleted = true;
+                apiCompleted = true; // 解鎖動畫，讓它立刻平滑過渡到 100% 並顯示結果
             }
         }
 
