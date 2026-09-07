@@ -601,7 +601,7 @@ async function clockInOut(status) {
 
         let progress = 0;
         function animate() {
-            progress = Math.min(progress + 0.01, 1);
+            progress = Math.min(progress + 0.008, 1);
             circle.style.strokeDashoffset = circumference * (1 - progress);
 
             const rC = Math.round(startColor.r*(1-progress) + endColor.r*progress);
