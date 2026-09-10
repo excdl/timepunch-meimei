@@ -352,7 +352,7 @@ button:not(:disabled):active {
 </div>
  
 <script>
-const API_ENDPOINT = "https://script.google.com/macros/s/AKfycbwTVj_3cPs-oDGGTwhG3YAGHlemk3Lt3AZAM5YnMCFIFzpgO-lFvWMX_g-O45upQXzO/exec";
+const API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxayHjr-yHd_qlQoGdVo9QKaqi91WHK_keP0dxJU_uVcEbCpwGsYjpAkC6tGfE3nIF_/exec";
 
 let userId="", userName="", dataReady=false;
 let statusLoaded=false;
@@ -394,25 +394,54 @@ function setButtonsLock(lock, textStart = "上班", textEnd = "下班") {
     btnEnd.textContent = textEnd;
 }
 
-// ====== 讀取主管清單 ======
-async function loadManagers() {
-    try {
-        const res = await fetch(`${API_ENDPOINT}?action=getManagers`);
-        MANAGERS = await res.json();
-        isManager = MANAGERS.includes(userId);
-        if (isManager) {
-            document.getElementById("btnApprove").style.display = "block";
-        }
-    } catch(err) {
-        console.error("讀取主管失敗", err);
-        MANAGERS = [];
-    }
-}
-
 // ====== 日期格式 ======
 function getTodayString() {
     const d = new Date();
     return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")}`;
+}
+
+// ====== 本地快取讀寫 (實現秒開) ======
+function loadCachedRecords() {
+    const cachedData = localStorage.getItem(`todayRecords_${getTodayString()}`);
+    if (cachedData) {
+        try {
+            const data = JSON.parse(cachedData);
+            renderRecords(data);
+        } catch (e) {}
+    } else {
+        todayRecords.innerHTML = `<div class="records-empty">載入紀錄中...</div>`;
+    }
+}
+
+function saveCachedRecords(data) {
+    try {
+        localStorage.setItem(`todayRecords_${getTodayString()}`, JSON.stringify(data));
+    } catch (e) {}
+}
+
+// ====== 共用渲染邏輯 ======
+function renderRecords(data) {
+    if (!data || !data.length) {
+        todayRecords.innerHTML = `<div class="records-empty">今日尚無打卡紀錄</div>`;
+        return;
+    }
+
+    const recordsHTML = data.map(r => {
+        let color = r.status === "下班" ? "#2ecc71" : "#3498db";
+        if (r.company && r.company.includes("錯誤")) color = "#e67e22";
+        
+        return `
+            <div class="record-item" style="border-left-color: ${color};">
+              <div class="record-info">
+                <div class="record-status">${r.status}</div>
+                <div class="record-details">${r.company || "未知位置"}</div>
+              </div>
+              <div class="record-time" style="color: ${color};">${r.time}</div>
+            </div>
+        `;
+    }).join("");
+
+    todayRecords.innerHTML = recordsHTML;
 }
 
 // ====== IP 預載 ======
@@ -458,6 +487,25 @@ async function initUser() {
     }
 }
 
+// ====== 合併初始化 (同時取得主管清單與今日紀錄) ======
+async function initApp() {
+    try {
+        const res = await fetch(`${API_ENDPOINT}?action=initApp&userId=${userId}&date=${getTodayString()}`);
+        const data = await res.json();
+        
+        MANAGERS = data.managers || [];
+        isManager = MANAGERS.includes(userId);
+        if (isManager) {
+            document.getElementById("btnApprove").style.display = "block";
+        }
+
+        renderRecords(data.todayRecords);
+        saveCachedRecords(data.todayRecords);
+    } catch (err) {
+        console.error("initApp 載入失敗", err);
+    }
+}
+
 // ====== 打卡區狀態判斷 ======
 async function updateStatus(forceRefresh = false) {
     if (!lastGPS) {
@@ -492,39 +540,6 @@ async function updateStatus(forceRefresh = false) {
         statusLoaded = true;
     } catch (err) {
         console.warn("狀態更新失敗:", err);
-    }
-}
-
-// ====== 今日紀錄更新 ======
-async function updateTodayRecords() {
-    try {
-        const res = await fetch(`${API_ENDPOINT}?action=getToday&userId=${userId}&date=${getTodayString()}`);
-        const data = await res.json();
-        
-        if (!data || !data.length) {
-            todayRecords.innerHTML = `<div class="records-empty">今日尚無打卡紀錄</div>`;
-            return;
-        }
-
-        const recordsHTML = data.map(r => {
-            let color = r.status === "下班" ? "#2ecc71" : "#3498db";
-            if (r.company && r.company.includes("錯誤")) color = "#e67e22";
-            
-            return `
-                <div class="record-item" style="border-left-color: ${color};">
-                  <div class="record-info">
-                    <div class="record-status">${r.status}</div>
-                    <div class="record-details">${r.company || "未知位置"}</div>
-                  </div>
-                  <div class="record-time" style="color: ${color};">${r.time}</div>
-                </div>
-            `;
-        }).join("");
-
-        todayRecords.innerHTML = recordsHTML;
-    } catch (err) {
-        console.error(err);
-        todayRecords.innerHTML = `<div class="records-empty" style="color: #e74c3c;">今日打卡紀錄讀取失敗</div>`;
     }
 }
 
@@ -564,7 +579,7 @@ async function sendSelfMessage(record) {
     }
 }
 
-// ====== 打卡動作執行（改為圓形漸層動畫） ======
+// ====== 打卡動作執行 ======
 async function clockInOut(status) {
     if (!dataReady || !statusLoaded) {
         Swal.fire({ icon: "info", title: "資料讀取中或定位中", timer: 1500, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -579,7 +594,6 @@ async function clockInOut(status) {
     btn.disabled = true;
     const originalText = btn.textContent;
 
-    // ===== 啟動圓形漸層倒數動畫 =====
     const wrapper = document.getElementById("countdownWrapper");
     const circle = document.getElementById("circleProgress");
     const text = document.getElementById("countdownText");
@@ -601,7 +615,7 @@ async function clockInOut(status) {
 
         let progress = 0;
         function animate() {
-            progress = Math.min(progress + 0.0065, 1);
+            progress = Math.min(progress + 0.008, 1);
             circle.style.strokeDashoffset = circumference * (1 - progress);
 
             const rC = Math.round(startColor.r*(1-progress) + endColor.r*progress);
@@ -612,7 +626,6 @@ async function clockInOut(status) {
             if(progress < 1) {
                 requestAnimationFrame(animate);
             } else {
-                // 動畫完成後淡出收起
                 wrapper.style.transition = "opacity 0.6s";
                 wrapper.style.opacity = 0;
                 setTimeout(() => {
@@ -641,7 +654,7 @@ async function clockInOut(status) {
                 Swal.fire({ icon: "warning", title: data.message || "打卡無效", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
             }
             sendSelfMessage(record);
-            updateTodayRecords();
+            await initApp(); // 重新同步最新紀錄與快取
             updateStatus(true);
         } else {
             Swal.fire({ icon: "error", title: "伺服器回應異常", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -672,12 +685,16 @@ window.onload = async () => {
     preloadIP();
 
     try {
+        // 1. 優先透過快取秒開畫面
+        loadCachedRecords();
+
+        // 2. 初始化 LINE 使用者
         await initUser();
         dataReady = true;
-        await Promise.all([
-            updateTodayRecords(),
-            loadManagers()
-        ]);
+
+        // 3. 透過合併後的 initApp 請求一次帶回主管清單與今日打卡
+        await initApp();
+
         if (lastGPS) updateStatus(true);
     } catch (error) {
         console.error("初始化失敗", error);
