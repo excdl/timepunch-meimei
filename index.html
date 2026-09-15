@@ -579,7 +579,7 @@ async function sendSelfMessage(record) {
     }
 }
 
-// ====== 打卡動作執行 ======
+// ====== 打卡動作執行 (含即時紀錄預覽與防重複鎖定) ======
 async function clockInOut(status) {
     if (!dataReady || !statusLoaded) {
         Swal.fire({ icon: "info", title: "資料讀取中或定位中", timer: 1500, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -646,13 +646,41 @@ async function clockInOut(status) {
 
         if (data && data.message) {
             const record = { userName, status: data.status || status, date: data.date, time: data.time, company: data.company || "未知", rangeStatus: data.rangeStatus };
+            
             if (data.message.includes("錯誤")) {
                 Swal.fire({ icon: "error", title: data.message, timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
-            } else if (data.rangeStatus === "有效打卡區") {
-                Swal.fire({ icon: "success", title: data.message || "打卡成功", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
             } else {
-                Swal.fire({ icon: "warning", title: data.message || "打卡無效", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
+                // 💡 畫面即時預覽：在彈出提示前，立刻將這筆最新紀錄插入畫面，讓使用者秒見打卡結果
+                const recordColor = (data.status || status) === "下班" ? "#2ecc71" : "#3498db";
+                const netLabel = data.company || "未知";
+                const netColor = netLabel.includes("公司") ? "#7f8c8d" : "#e67e22";
+                
+                const newRecordHTML = `
+                    <div class="record-item" style="border-left-color: ${recordColor}; animation: bounce 0.4s ease;">
+                      <div class="record-info">
+                        <div class="record-status">${data.status || status}</div>
+                        <div class="record-details" style="color: ${netColor};">${netLabel}</div>
+                      </div>
+                      <div class="record-time" style="color: ${recordColor};">${data.time}</div>
+                    </div>
+                `;
+
+                const todayRecords = document.getElementById("todayRecords");
+                if (todayRecords) {
+                    if (todayRecords.innerHTML.includes("今日尚無打卡紀錄") || todayRecords.innerHTML.includes("紀錄讀取失敗") || todayRecords.innerHTML.includes("載入中")) {
+                        todayRecords.innerHTML = newRecordHTML;
+                    } else {
+                        todayRecords.innerHTML += newRecordHTML;
+                    }
+                }
+
+                if (data.rangeStatus === "有效打卡區") {
+                    Swal.fire({ icon: "success", title: data.message || "打卡成功", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
+                } else {
+                    Swal.fire({ icon: "warning", title: data.message || "打卡無效", timer: 2000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
+                }
             }
+            
             sendSelfMessage(record);
             await initApp(); // 重新同步最新紀錄與快取
             updateStatus(true);
