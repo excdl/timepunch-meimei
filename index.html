@@ -503,7 +503,7 @@ async function sendSelfMessage(record) {
     try {
         await liff.sendMessages([{
             type: 'flex',
-            altText: '打卡通知',
+            altText: `【打卡通知】${record.status}成功`,
             contents: {
                 type: "bubble",
                 header: {
