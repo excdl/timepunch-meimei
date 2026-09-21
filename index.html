@@ -316,7 +316,7 @@ button:not(:disabled):active {
 </div>
  
 <script>
-const API_ENDPOINT = "https://script.google.com/macros/s/AKfycbxFpowwUvLrjhvV1z0ItOKT1l0WLZPPW5Gdoc98_R7jOoWwdXAB_ADD4C5FrwRNIP8/exec";
+const API_ENDPOINT = "https://script.google.com/macros/s/AKfycbwtHO6dNtvAJWznE4rMI8BTgovgl2HrBgMGtU57dLGlNGMt57WMGhyS0bL-ymUsvpGM/exec";
 
 let userId="", userName="", dataReady=false;
 let statusLoaded=false;
@@ -544,13 +544,24 @@ async function clockInOut(status) {
     const originalText = btn.textContent;
 
     // 簡化 Loading 提示，改用較快或輕量的過場
-    Swal.fire({
-        html: `<h3 style="margin:0; color:#2c3e50; font-size:18px;">打卡處理中...</h3>`,
-        showConfirmButton: false,
-        allowOutsideClick: false,
-        timer: 3000, // 設定一個安全逾時
-        customClass: { popup: 'custom-swal-popup' }
-    });
+    // 顯示帶有轉圈圈動畫的讀取提示
+Swal.fire({
+    html: `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px;">
+            <div style="width: 36px; height: 36px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+            <h3 style="margin: 15px 0 0 0; color: #2c3e50; font-size: 16px;">打卡處理中...</h3>
+        </div>
+        <style>
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    `,
+    showConfirmButton: false,
+    allowOutsideClick: false,
+    customClass: { popup: 'custom-swal-popup' }
+});
 
     try {
         // 1. 發送打卡請求到後端
