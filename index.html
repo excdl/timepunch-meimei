@@ -389,9 +389,27 @@ async function preloadIP() {
 }
 function getIP() { return cachedIP || ""; }
 
-// ====== GPS 追蹤 ======
-function initGPSWatcher() {
-    if(!navigator.geolocation) return;
+// ====== 加快定位：結合快速 getCurrentPosition 與持續 watchPosition ======
+function initFastGPS() {
+    if(!navigator.geolocation) {
+        statusInfo.textContent = "您的裝置不支援定位";
+        return;
+    }
+
+    // 1. 先用最快速度取得一次當前位置（減少等待）
+    navigator.geolocation.getCurrentPosition(pos => {
+        if (!lastGPS) { // 如果 watchPosition 還沒回報過，優先採用這組
+            gpsAccuracy = pos.coords.accuracy;
+            lastGPS = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            updateStatus(true);
+        }
+    }, err => {
+        console.warn("首次快速定位失敗，等待 WatchPosition:", err);
+    }, {
+        enableHighAccuracy: false, timeout: 3000, maximumAge: 10000
+    });
+
+    // 2. 啟動高精度持續監控
     navigator.geolocation.watchPosition(pos => {
         const isFirstLocation = (lastGPS === null);
         gpsAccuracy = pos.coords.accuracy;
@@ -459,8 +477,9 @@ async function updateStatus(forceRefresh = false) {
     }
 }
 
-// ====== 今日紀錄更新 ======
+// ====== 今日紀錄更新 (加入載入中優化與防呆) ======
 async function updateTodayRecords() {
+    if (!userId) return; // 確保有 userId 才發送
     try {
         const res = await fetch(`${API_ENDPOINT}?action=getToday&userId=${userId}&date=${getTodayString()}`);
         const data = await res.json();
@@ -522,7 +541,6 @@ async function sendSelfMessage(record) {
                 }
             }
         }]);
-        await new Promise(r => setTimeout(r, 800));
     } catch(err) {
         console.error("LIFF 訊息傳送失敗:", err);
     }
@@ -543,35 +561,26 @@ async function clockInOut(status) {
     btn.disabled = true;
     const originalText = btn.textContent;
 
-    // 簡化 Loading 提示，改用較快或輕量的過場
-    // 顯示帶有轉圈圈動畫的讀取提示
-Swal.fire({
-    html: `
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px;">
-            <div style="width: 36px; height: 36px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-            <h3 style="margin: 15px 0 0 0; color: #2c3e50; font-size: 16px;">打卡處理中...</h3>
-        </div>
-        <style>
-            @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-            }
-        </style>
-    `,
-    showConfirmButton: false,
-    allowOutsideClick: false,
-    customClass: { popup: 'custom-swal-popup' }
-});
+    Swal.fire({
+        html: `
+            <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 10px;">
+                <div style="width: 36px; height: 36px; border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <h3 style="margin: 15px 0 0 0; color: #2c3e50; font-size: 16px;">打卡處理中...</h3>
+            </div>
+            <style>
+                @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            </style>
+        `,
+        showConfirmButton: false,
+        allowOutsideClick: false,
+        customClass: { popup: 'custom-swal-popup' }
+    });
 
     try {
-        // 1. 發送打卡請求到後端
-        const resPromise = fetch(API_ENDPOINT, {
+        const res = await fetch(API_ENDPOINT, {
             method: "POST",
             body: JSON.stringify({ userId, userName, ip: getIP(), gps: lastGPS || { lat: "", lng: "" }, status })
         });
-
-        // 可以在這裡同時觸發前端畫面先做預期的變更，或等待回應
-        const res = await resPromise;
         const data = await res.json();
 
         if (data && data.message) {
@@ -584,7 +593,6 @@ Swal.fire({
                 rangeStatus: data.rangeStatus 
             };
 
-            // 快速顯示結果 (將 timer 縮短至 1000ms)
             let iconType = "success";
             if (data.message.includes("錯誤")) iconType = "error";
             else if (data.rangeStatus !== "有效打卡區") iconType = "warning";
@@ -597,12 +605,12 @@ Swal.fire({
                 customClass: { popup: 'custom-swal-popup' }
             });
 
-            // 2. 將後續動作改為平行非同步執行，不卡住 UI 關閉
+            // 非同步平行更新畫面與發送訊息
             Promise.all([
                 sendSelfMessage(record),
                 updateTodayRecords(),
                 updateStatus(true)
-            ]).catchall = (err) => console.warn(err);
+            ]).catch(err => console.warn(err));
 
         } else {
             Swal.fire({ icon: "error", title: "伺服器回應異常", timer: 1200, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -623,22 +631,28 @@ document.getElementById("btnApprove").onclick = () => {
     window.location.href = "https://script.google.com/macros/s/AKfycbz1FavWzmy5sl8iFCRfp7ZHQ_3EdFhTw_M093XAtq8ISIn9jiWrujfgZjjqRZxorTdkLQ/exec";
 };
 
-// ====== 頁面初始化 ======
+// ====== 頁面初始化 (平行發送請求加速載入) ======
 window.onload = async () => {
     statusInfo.textContent = "定位載入中…";
     statusInfo.style.background = "#95a5a6";
     setButtonsLock(true, "同步中...", "同步中...");
     
-    initGPSWatcher();
+    // 同步初始化 GPS 與 IP 預載
+    initFastGPS();
     preloadIP();
 
     try {
+        // 1. 先取得 LINE 使用者身份
         await initUser();
         dataReady = true;
+
+        // 2. 取得身份後，立刻「同時」抓取今日紀錄與主管清單
         await Promise.all([
             updateTodayRecords(),
             loadManagers()
         ]);
+
+        // 3. 如果此時 GPS 已經先抓到了，就立刻驗證打卡區狀態
         if (lastGPS) updateStatus(true);
     } catch (error) {
         console.error("初始化失敗", error);
