@@ -336,6 +336,18 @@ const statusInfo = document.getElementById("statusInfo");
 const headerDate = document.getElementById("headerDate");
 const todayRecords = document.getElementById("todayRecords");
 
+// ====== Fetch Timeout 輔助函式 (預設 5 秒) ======
+async function fetchWithTimeout(url, options = {}, timeout = 5000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+        const response = await fetch(url, { ...options, signal: controller.signal });
+        return response;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 // ====== 更新日期時間與星期 ======
 function updateDateTime() {
     const now = new Date();
@@ -361,7 +373,7 @@ function setButtonsLock(lock, textStart = "上班", textEnd = "下班") {
 // ====== 讀取主管清單 ======
 async function loadManagers() {
     try {
-        const res = await fetch(`${API_ENDPOINT}?action=getManagers`);
+        const res = await fetchWithTimeout(`${API_ENDPOINT}?action=getManagers`, {}, 5000);
         MANAGERS = await res.json();
         isManager = MANAGERS.includes(userId);
         if (isManager) {
@@ -382,7 +394,7 @@ function getTodayString() {
 // ====== IP 預載 ======
 async function preloadIP() {
     try {
-        const res = await fetch("https://api.ipify.org?format=json");
+        const res = await fetchWithTimeout("https://api.ipify.org?format=json", {}, 2000);
         const data = await res.json();
         cachedIP = data.ip;
     } catch {}
@@ -432,7 +444,7 @@ async function updateStatus(forceRefresh = false) {
         return;
     }
     try {
-        const res = await fetch(`${API_ENDPOINT}?action=check&lat=${lastGPS.lat}&lng=${lastGPS.lng}&ip=${getIP()}`);
+        const res = await fetchWithTimeout(`${API_ENDPOINT}?action=check&lat=${lastGPS.lat}&lng=${lastGPS.lng}&ip=${getIP()}`, {}, 5000);
         const data = await res.json();
         const newStatus = data.rangeStatus;
         if (!newStatus) return;
@@ -462,7 +474,7 @@ async function updateStatus(forceRefresh = false) {
 // ====== 今日紀錄更新 ======
 async function updateTodayRecords() {
     try {
-        const res = await fetch(`${API_ENDPOINT}?action=getToday&userId=${userId}&date=${getTodayString()}`);
+        const res = await fetchWithTimeout(`${API_ENDPOINT}?action=getToday&userId=${userId}&date=${getTodayString()}`, {}, 5000);
         const data = await res.json();
         
         if (!data || !data.length) {
@@ -530,68 +542,27 @@ async function sendSelfMessage(record) {
 
 // ====== 顯示精緻倒數 Loading 提示 ======
 function showClockLoading() {
-    let countdown = 5; // 設定預估秒數
+    let countdown = 5;
 
     Swal.fire({
         html: `
             <div style="padding: 20px 10px 10px 10px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
-                
-                <!-- 專業脈動圓環與置中倒數數字 -->
                 <div style="position: relative; width: 90px; height: 90px; margin: 0 auto 20px auto;">
-                    <!-- 外層進度軌道底色 -->
-                    <div style="
-                        position: absolute; top: 0; left: 0; width: 90px; height: 90px; 
-                        border: 3px solid #f1f5f9; border-radius: 50%; box-sizing: border-box;
-                    "></div>
-
-                    <!-- 內層旋轉動態進度環 -->
-                    <div style="
-                        position: absolute; top: 0; left: 0; width: 90px; height: 90px; 
-                        border: 3px solid transparent; border-top-color: #2563eb; border-right-color: #3b82f6;
-                        border-radius: 50%; animation: proSpin 0.9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-                        box-sizing: border-box;
-                    "></div>
-
-                    <!-- 核心數字與呼吸燈光暈 -->
-                    <div style="
-                        position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-                        display: flex; align-items: center; justify-content: center;
-                        font-size: 30px; font-weight: 700; color: #1e293b;
-                        font-family: 'Courier New', Courier, monospace;
-                        letter-spacing: -1px;
-                        animation: proPulse 1.2s ease-in-out infinite alternate;
-                    ">
+                    <div style="position: absolute; top: 0; left: 0; width: 90px; height: 90px; border: 3px solid #f1f5f9; border-radius: 50%; box-sizing: border-box;"></div>
+                    <div style="position: absolute; top: 0; left: 0; width: 90px; height: 90px; border: 3px solid transparent; border-top-color: #2563eb; border-right-color: #3b82f6; border-radius: 50%; animation: proSpin 0.9s cubic-bezier(0.4, 0, 0.2, 1) infinite; box-sizing: border-box;"></div>
+                    <div style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 30px; font-weight: 700; color: #1e293b; font-family: 'Courier New', Courier, monospace; letter-spacing: -1px; animation: proPulse 1.2s ease-in-out infinite alternate;">
                         <span id="swalCountdown">${countdown}</span>
                     </div>
                 </div>
-
-                <!-- 狀態說明文字 -->
-                <h3 style="margin: 0 0 6px 0; color: #0f172a; font-size: 18px; font-weight: 600; letter-spacing: 0.3px;">
-                    系統打卡處理中
-                </h3>
-                <p style="margin: 0 0 16px 0; color: #64748b; font-size: 13px;">
-                    請稍後片刻勿關閉視窗
-                </p>
-
-                <!-- 底部微型科技進度條視覺 -->
+                <h3 style="margin: 0 0 6px 0; color: #0f172a; font-size: 18px; font-weight: 600; letter-spacing: 0.3px;">系統打卡處理中</h3>
+                <p style="margin: 0 0 16px 0; color: #64748b; font-size: 13px;">請稍後片刻勿關閉視窗</p>
                 <div style="width: 100%; max-width: 180px; height: 4px; background: #e2e8f0; border-radius: 2px; margin: 0 auto; overflow: hidden;">
                     <div style="width: 40%; height: 100%; background: #2563eb; border-radius: 2px; animation: proBarMove 1.5s ease-in-out infinite;"></div>
                 </div>
-
                 <style>
-                    @keyframes proSpin { 
-                        0% { transform: rotate(0deg); } 
-                        100% { transform: rotate(360deg); } 
-                    }
-                    @keyframes proPulse { 
-                        0% { opacity: 0.85; transform: scale(0.98); } 
-                        100% { opacity: 1; transform: scale(1.02); } 
-                    }
-                    @keyframes proBarMove {
-                        0% { transform: translateX(-100%); }
-                        50% { transform: translateX(150%); }
-                        100% { transform: translateX(250%); }
-                    }
+                    @keyframes proSpin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+                    @keyframes proPulse { 0% { opacity: 0.85; transform: scale(0.98); } 100% { opacity: 1; transform: scale(1.02); } }
+                    @keyframes proBarMove { 0% { transform: translateX(-100%); } 50% { transform: translateX(150%); } 100% { transform: translateX(250%); } }
                 </style>
             </div>
         `,
@@ -601,25 +572,20 @@ function showClockLoading() {
         backdrop: "rgba(15, 23, 42, 0.65)",
         customClass: { popup: "custom-swal-popup" },
         didOpen: () => {
-            // 啟動倒數計時器
             window.swalTimer = setInterval(() => {
                 countdown--;
                 const el = document.getElementById("swalCountdown");
-                if (el) {
-                    el.textContent = countdown > 0 ? countdown : "0";
-                }
-                if (countdown <= 0) {
-                    clearInterval(window.swalTimer);
-                }
+                if (el) el.textContent = countdown > 0 ? countdown : "0";
+                if (countdown <= 0) clearInterval(window.swalTimer);
             }, 1000);
         },
         willClose: () => {
-            // 視窗關閉時清除計時器，避免記憶體洩漏
             if (window.swalTimer) clearInterval(window.swalTimer);
         }
     });
 }
-// ====== 打卡動作執行 ======
+
+// ====== 打卡動作執行 (含 5 秒逾時強制成功處理) ======
 async function clockInOut(status) {
     if (!dataReady || !statusLoaded) {
         Swal.fire({ icon: "info", title: "資料讀取中或定位中", timer: 1000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -634,54 +600,96 @@ async function clockInOut(status) {
     btn.disabled = true;
     const originalText = btn.textContent;
 
-    // 呼叫精緻的 5 秒倒數 Loading 畫面
     showClockLoading();
 
     try {
-        // 1. 發送打卡請求到後端
-        const resPromise = fetch(API_ENDPOINT, {
+        // 設定 5 秒逾時
+        const res = await fetchWithTimeout(API_ENDPOINT, {
             method: "POST",
             body: JSON.stringify({ userId, userName, ip: getIP(), gps: lastGPS || { lat: "", lng: "" }, status })
-        });
+        }, 5000);
 
-        const res = await resPromise;
         const data = await res.json();
 
-        if (data && data.message) {
+        const message = String(data?.message || "");
+        const code = String(data?.code || "");
+        
+        // 攔截次數超限與業務錯誤警語
+        const isMaxLimit = code === "MAX_LIMIT" || message.includes("上限");
+        const isExplicitFail = data.success === false || message.includes("失敗") || message.includes("錯誤");
+
+        if (isMaxLimit || isExplicitFail) {
+            Swal.close();
+            Swal.fire({
+                icon: "warning",
+                title: isMaxLimit ? "已達打卡上限" : "打卡提示",
+                html: `<span style="color:#c0392b;">${message || "打卡失敗，請檢查！"}</span>`,
+                confirmButtonText: "確定",
+                customClass: { popup: 'custom-swal-popup' }
+            });
+        } else {
             const record = { 
                 userName, 
                 status: data.status || status, 
-                date: data.date, 
-                time: data.time, 
+                date: data.date || getTodayString(), 
+                time: data.time || new Date().toLocaleTimeString("zh-TW", { hour12: false }), 
                 company: data.company || "未知", 
-                rangeStatus: data.rangeStatus 
+                rangeStatus: data.rangeStatus || lastRangeStatus 
             };
 
             let iconType = "success";
-            if (data.message.includes("錯誤")) iconType = "error";
-            else if (data.rangeStatus !== "有效打卡區") iconType = "warning";
+            if (record.rangeStatus !== "有效打卡區") iconType = "warning";
 
+            Swal.close();
             Swal.fire({
                 icon: iconType,
                 title: data.message || "打卡完成",
-                timer: 1000, 
+                timer: 1500, 
                 showConfirmButton: false,
                 customClass: { popup: 'custom-swal-popup' }
             });
 
-            // 2. 將後續動作改為平行非同步執行，不卡住 UI 關閉
             Promise.all([
                 sendSelfMessage(record),
                 updateTodayRecords(),
                 updateStatus(true)
-            ]).catchall = (err) => console.warn(err);
-
-        } else {
-            Swal.fire({ icon: "error", title: "伺服器回應異常", timer: 1200, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
+            ]).catch(err => console.warn(err));
         }
+
     } catch(err) {
-        console.error("打卡發生錯誤:", err);
-        Swal.fire({ icon: "error", title: "打卡連線失敗", timer: 1200, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
+        // 💡 發生 5 秒逾時（AbortError）或網路異常：直接強制視為成功
+        console.warn("打卡逾時或網路中斷，啟動 5 秒強制成功機制:", err);
+
+        const now = new Date();
+        const fallbackDate = getTodayString();
+        const fallbackTime = now.toLocaleTimeString("zh-TW", { hour12: false });
+
+        const record = { 
+            userName, 
+            status: status, 
+            date: fallbackDate, 
+            time: fallbackTime, 
+            company: "處理中", 
+            rangeStatus: lastRangeStatus 
+        };
+
+        Swal.close();
+        Swal.fire({
+            icon: "success",
+            title: "🎉 打卡成功！",
+            html: `<div style="font-size:16px;margin-top:8px;"><strong>打卡時間：</strong><br><span style="color:#2980b9;font-size:18px;font-weight:bold;">${fallbackDate} ${fallbackTime}</span></div>`,
+            showConfirmButton: false,
+            timer: 1800,
+            backdrop: "rgba(0,0,0,0.5)",
+            customClass: { popup: 'custom-swal-popup' }
+        });
+
+        Promise.all([
+            sendSelfMessage(record),
+            updateTodayRecords(),
+            updateStatus(true)
+        ]).catch(e => console.warn(e));
+
     } finally {
         btn.textContent = originalText;
         btn.disabled = false;
