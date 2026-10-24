@@ -504,9 +504,13 @@ async function updateTodayRecords() {
     }
 }
 
-// ====== LINE Flex 訊息通知 ======
-async function sendSelfMessage(record) {
-    if (!liff.isInClient()) return;
+// ====== LINE Flex 訊息通知 (含自動重試機制與 App 內檢查) ======
+async function sendSelfMessage(record, retries = 2) {
+    if (typeof liff === "undefined" || !liff.isInClient()) {
+        console.warn("目前不在 LINE App 內 (LIFF Client)，無法使用 liff.sendMessages() 發送通知。");
+        return false;
+    }
+
     let headerColor = "#3498db";
     if (record.status === "下班") headerColor = "#2ecc71";
     if (record.rangeStatus !== "有效打卡區") headerColor = "#e67e22";
@@ -534,9 +538,16 @@ async function sendSelfMessage(record) {
                 }
             }
         }]);
+        console.log("LINE 打卡通知訊息發送成功");
         await new Promise(r => setTimeout(r, 800));
+        return true;
     } catch(err) {
-        console.error("LIFF 訊息傳送失敗:", err);
+        console.error(`LINE 訊息傳送失敗（剩餘重試次數: ${retries}）:`, err);
+        if (retries > 0) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return sendSelfMessage(record, retries - 1);
+        }
+        return false;
     }
 }
 
@@ -649,6 +660,7 @@ async function clockInOut(status) {
                 customClass: { popup: 'custom-swal-popup' }
             });
 
+            // 🛡️ 正常成功回傳時觸發 LINE 訊息發送（帶重試機制）
             Promise.all([
                 sendSelfMessage(record),
                 updateTodayRecords(),
@@ -684,6 +696,7 @@ async function clockInOut(status) {
             customClass: { popup: 'custom-swal-popup' }
         });
 
+        // 🛡️ 逾時 Fallback 強制成功時，同步啟動重試機制發送 LINE 通知
         Promise.all([
             sendSelfMessage(record),
             updateTodayRecords(),
