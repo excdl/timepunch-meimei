@@ -601,7 +601,6 @@ function showClockLoading() {
         backdrop: "rgba(15, 23, 42, 0.65)",
         customClass: { popup: "custom-swal-popup" },
         didOpen: () => {
-            // 啟動倒數計時器
             window.swalTimer = setInterval(() => {
                 countdown--;
                 const el = document.getElementById("swalCountdown");
@@ -614,12 +613,12 @@ function showClockLoading() {
             }, 1000);
         },
         willClose: () => {
-            // 視窗關閉時清除計時器，避免記憶體洩漏
             if (window.swalTimer) clearInterval(window.swalTimer);
         }
     });
 }
-// ====== 打卡動作執行 ======
+
+// ====== 打卡動作執行 (具備完整防呆與 Fallback 機制) ======
 async function clockInOut(status) {
     if (!dataReady || !statusLoaded) {
         Swal.fire({ icon: "info", title: "資料讀取中或定位中", timer: 1000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -638,9 +637,10 @@ async function clockInOut(status) {
     showClockLoading();
 
     let resData = null;
+    let isRequestSuccessful = false;
 
     try {
-        // 設定 10 秒逾時控制器，確保 GAS 有充足時間寫入，同時不無限卡住
+        // 設定 10 秒逾時控制器，確保 GAS 有充足時間寫入
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000);
 
@@ -655,6 +655,7 @@ async function clockInOut(status) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         
         resData = await res.json();
+        isRequestSuccessful = true;
     } catch (err) {
         console.warn("打卡請求逾時或連線中斷，啟動備援機制:", err);
     }
@@ -662,11 +663,25 @@ async function clockInOut(status) {
     // 關閉 Loading 彈窗
     Swal.close();
 
+    // 🛑 若後端明確回傳失敗或系統忙碌，阻斷並提示使用者
+    if (isRequestSuccessful && resData && (resData.success === false || resData.message?.includes("失敗") || resData.message?.includes("忙碌"))) {
+        Swal.fire({
+            icon: "error",
+            title: resData.message || "打卡失敗",
+            text: "請稍後再試一次",
+            confirmButtonText: "確定",
+            customClass: { popup: 'custom-swal-popup' }
+        });
+        btn.textContent = originalText;
+        btn.disabled = false;
+        return;
+    }
+
     const now = new Date();
     const fallbackDate = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,"0")}/${String(now.getDate()).padStart(2,"0")}`;
     const fallbackTime = now.toLocaleTimeString("zh-TW", { hour12: false });
 
-    // 組合最終要呈現與發送的資料（如果後端逾時未回傳，則使用前端當下時間做 Fallback）
+    // 組合最終要呈現與發送的資料（若逾時則使用前端當下時間做 Fallback）
     const record = { 
         userName, 
         status: resData?.status || status, 
@@ -677,9 +692,7 @@ async function clockInOut(status) {
     };
 
     let iconType = "success";
-    if (resData?.message && resData.message.includes("錯誤")) {
-        iconType = "error";
-    } else if (record.rangeStatus !== "有效打卡區") {
+    if (record.rangeStatus !== "有效打卡區") {
         iconType = "warning";
     }
 
