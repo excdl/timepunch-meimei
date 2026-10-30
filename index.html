@@ -596,7 +596,7 @@ function showClockLoading() {
     });
 }
 
-// ====== 打卡動作執行 (含 5 秒逾時強制成功處理) ======
+// ====== 打卡動作執行 (含 5 秒逾時強制成功處理與寫入緩衝) ======
 async function clockInOut(status) {
     if (!dataReady || !statusLoaded) {
         Swal.fire({ icon: "info", title: "資料讀取中或定位中", timer: 1000, showConfirmButton: false, customClass: { popup: 'custom-swal-popup' } });
@@ -697,11 +697,13 @@ async function clockInOut(status) {
         });
 
         // 🛡️ 逾時 Fallback 強制成功時，同步啟動重試機制發送 LINE 通知
-        Promise.all([
-            sendSelfMessage(record),
-            updateTodayRecords(),
-            updateStatus(true)
-        ]).catch(e => console.warn(e));
+        sendSelfMessage(record).catch(e => console.warn(e));
+
+        // 💡 給予後端 1.5 秒緩衝時間寫入試算表後，再自動更新今日紀錄
+        setTimeout(() => {
+            updateTodayRecords().catch(e => console.warn(e));
+            updateStatus(true).catch(e => console.warn(e));
+        }, 1500);
 
     } finally {
         btn.textContent = originalText;
