@@ -677,7 +677,7 @@ function buildFlexMessages(record) {
     const reasonText = record.rangeStatus !== "有效打卡區" ? "異常原因：超出打卡區" : "";
     return [{
         type: 'flex',
-        altText: `【打卡通知】${safeName} ${safeStatus}成功 (${safeTime})`,
+        altText: `【打卡通知】${safeStatus}成功`,
         contents: {
             type: "bubble",
             header: {
